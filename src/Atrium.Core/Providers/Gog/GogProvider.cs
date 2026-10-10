@@ -15,6 +15,7 @@ public sealed class GogProvider : ILibraryProvider
 
     public Task<IReadOnlyList<ProviderGame>> GetGamesAsync(CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         var results = new List<ProviderGame>();
 
         try
@@ -56,7 +57,7 @@ public sealed class GogProvider : ILibraryProvider
                 }
             }
         }
-        catch { }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
 
         return Task.FromResult<IReadOnlyList<ProviderGame>>(results);
     }

@@ -11,6 +11,11 @@ public static class PreferredSourceResolver
         StoreKind.Local
     };
 
+    public static IReadOnlyList<StoreKind> CreateStoreOrder(StoreKind preferredStore) =>
+        DefaultStoreOrder.Contains(preferredStore)
+            ? new[] { preferredStore }.Concat(DefaultStoreOrder.Where(store => store != preferredStore)).ToArray()
+            : DefaultStoreOrder;
+
     /// <summary>
     /// Resolves the primary GameSource to use for launching and primary display.
     /// Priority:

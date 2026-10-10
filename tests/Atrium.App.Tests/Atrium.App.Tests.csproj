@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.0.1" PrivateAssets="all" />
+    <PackageReference Include="FluentAssertions" Version="8.0.1" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    <ProjectReference Include="../../src/Atrium.Core/Atrium.Core.csproj" />
+    <!-- Exercise the production viewmodels without bootstrapping the WinUI desktop host. -->
+    <Compile Include="../../src/Atrium.App/ViewModels/GameCardViewModel.cs" Link="ViewModels/GameCardViewModel.cs" />
+    <Compile Include="../../src/Atrium.App/ViewModels/GpuOptimizerViewModel.cs" Link="ViewModels/GpuOptimizerViewModel.cs" />
+    <Compile Include="../../src/Atrium.App/ViewModels/SourcesViewModel.cs" Link="ViewModels/SourcesViewModel.cs" />
+  </ItemGroup>
+</Project>

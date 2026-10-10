@@ -31,6 +31,7 @@ public sealed class GogGalaxyProvider : ILibraryProvider
 
     public async Task<IReadOnlyList<ProviderGame>> GetGamesAsync(CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         var dbPath = _customDbPath ?? LauncherDetector.DetectGogGalaxyDatabasePath();
         if (string.IsNullOrEmpty(dbPath) || !File.Exists(dbPath))
         {

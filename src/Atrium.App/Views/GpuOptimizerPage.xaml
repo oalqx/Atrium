@@ -17,7 +17,7 @@
             <!-- Header -->
             <StackPanel Spacing="4">
                 <TextBlock Text="GPU &amp; Graphics Optimizer" FontSize="28" FontWeight="Bold"/>
-                <TextBlock Text="Intelligently enforces your discrete high-performance GPU for games with zero risk and one-click rollback."
+                <TextBlock Text="Set Windows high-performance GPU preferences and restore settings changed by Atrium."
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
             </StackPanel>
 
@@ -125,11 +125,14 @@
                                 <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
                                     <TextBlock Text="{x:Bind Title}" FontWeight="SemiBold" FontSize="14"/>
                                     <TextBlock Text="{x:Bind ExePath}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Text="{x:Bind PreferenceDescription, Mode=OneWay}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                    <TextBlock Text="{x:Bind ErrorMessage, Mode=OneWay}" FontSize="11" TextWrapping="Wrap"/>
                                 </StackPanel>
 
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
                                     <TextBlock Text="High-Performance GPU" FontSize="12" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                                     <ToggleSwitch IsOn="{x:Bind IsHighPerformance, Mode=OneWay}" 
+                                                  IsEnabled="{x:Bind CanChangePreference, Mode=OneWay}"
                                                   Toggled="OnToggleSwitchToggled"
                                                   Tag="{x:Bind}"
                                                   OnContent="" OffContent=""/>

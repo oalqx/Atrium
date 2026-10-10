@@ -14,20 +14,39 @@ public sealed record SyncResult(
     int TotalMergedGames,
     int TotalInstalledGames,
     IReadOnlyDictionary<StoreKind, int> GamesPerStore,
-    TimeSpan Duration);
+    TimeSpan Duration)
+{
+    public IReadOnlyDictionary<string, string> ProviderErrors { get; init; } = new Dictionary<string, string>();
+}
 
-public sealed class LibrarySyncService
+public enum SyncStage { Discovering, Scanning, Merging, Saving, Completed }
+
+public sealed record SyncProgress(SyncStage Stage, string Message, int CompletedSteps, int TotalSteps)
+{
+    public double Percent => TotalSteps > 0 ? Math.Clamp(100.0 * CompletedSteps / TotalSteps, 0, 100) : 0;
+}
+
+public interface ILibrarySyncService
+{
+    Task<SyncResult> SyncAsync(IEnumerable<string>? customLocalFolders = null,
+        CancellationToken cancellationToken = default, IProgress<SyncProgress>? progress = null);
+}
+
+public sealed class LibrarySyncService : ILibrarySyncService
 {
     private readonly LibraryDatabase _database;
+    private readonly Func<IReadOnlyList<string>, IReadOnlyList<ILibraryProvider>> _providerFactory;
+    private readonly SemaphoreSlim _syncLock = new(1, 1);
 
-    public LibrarySyncService(LibraryDatabase database)
+    public LibrarySyncService(LibraryDatabase database,
+        Func<IReadOnlyList<string>, IReadOnlyList<ILibraryProvider>>? providerFactory = null)
     {
         _database = database;
+        _providerFactory = providerFactory ?? CreateProviders;
     }
 
-    public async Task<SyncResult> SyncAsync(IEnumerable<string>? customLocalFolders = null, CancellationToken cancellationToken = default)
+    private static IReadOnlyList<ILibraryProvider> CreateProviders(IReadOnlyList<string> customLocalFolders)
     {
-        var startTime = DateTimeOffset.UtcNow;
         var paths = LauncherDetector.Detect();
         var providers = new List<ILibraryProvider>();
 
@@ -57,43 +76,73 @@ public sealed class LibrarySyncService
         }
 
         // Local custom directories
-        if (customLocalFolders != null)
+        if (customLocalFolders.Count > 0)
         {
-            providers.Add(new LocalProvider(customLocalFolders.ToList()));
+            providers.Add(new LocalProvider(customLocalFolders));
         }
+        return providers;
+    }
 
-        var allRawGames = new List<ProviderGame>();
-        var gamesPerStore = new Dictionary<StoreKind, int>();
-
-        foreach (var provider in providers)
+    public async Task<SyncResult> SyncAsync(IEnumerable<string>? customLocalFolders = null,
+        CancellationToken cancellationToken = default, IProgress<SyncProgress>? progress = null)
+    {
+        await _syncLock.WaitAsync(cancellationToken);
+        try
         {
-            if (cancellationToken.IsCancellationRequested) break;
-            try
-            {
-                var games = await provider.GetGamesAsync(cancellationToken);
-                allRawGames.AddRange(games);
+            var stopwatch = global::System.Diagnostics.Stopwatch.StartNew();
+            cancellationToken.ThrowIfCancellationRequested();
+            progress?.Report(new(SyncStage.Discovering, "Detecting launchers...", 0, 0));
+            var providers = _providerFactory(customLocalFolders?.ToList() ?? []);
+            cancellationToken.ThrowIfCancellationRequested();
+            int totalSteps = providers.Count + 2, completed = 0;
+            var allRawGames = new List<ProviderGame>();
+            var gamesPerStore = new Dictionary<StoreKind, int>();
+            var providerErrors = new Dictionary<string, string>();
 
-                foreach (var g in games)
+            foreach (var provider in providers)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                progress?.Report(new(SyncStage.Scanning, $"Scanning {provider.DisplayName}...", completed, totalSteps));
+                try
                 {
-                    gamesPerStore[g.Store] = gamesPerStore.GetValueOrDefault(g.Store, 0) + 1;
+                    var games = await provider.GetGamesAsync(cancellationToken);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    allRawGames.AddRange(games);
+
+                    foreach (var g in games)
+                    {
+                        gamesPerStore[g.Store] = gamesPerStore.GetValueOrDefault(g.Store, 0) + 1;
+                    }
                 }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    providerErrors[provider.DisplayName] = ex.Message;
+                }
+                completed++;
+                progress?.Report(new(SyncStage.Scanning, $"Finished {provider.DisplayName}.", completed, totalSteps));
             }
-            catch
-            {
-                // Silently isolate individual failing provider to prevent blocking overall sync
-            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            progress?.Report(new(SyncStage.Merging, "Combining games across launchers...", completed, totalSteps));
+            var merged = LibraryMerger.Merge(allRawGames, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            progress?.Report(new(SyncStage.Saving, "Saving your library...", ++completed, totalSteps));
+            await _database.UpsertGamesAsync(merged, cancellationToken);
+
+            var duration = stopwatch.Elapsed;
+            int installedCount = merged.Count(m => m.IsInstalled);
+
+            progress?.Report(new(SyncStage.Completed, "Library saved.", totalSteps, totalSteps));
+            return new SyncResult(
+                TotalMergedGames: merged.Count,
+                TotalInstalledGames: installedCount,
+                GamesPerStore: gamesPerStore,
+                Duration: duration) { ProviderErrors = providerErrors };
         }
-
-        var merged = LibraryMerger.Merge(allRawGames);
-        await _database.UpsertGamesAsync(merged);
-
-        var duration = DateTimeOffset.UtcNow - startTime;
-        int installedCount = merged.Count(m => m.IsInstalled);
-
-        return new SyncResult(
-            TotalMergedGames: merged.Count,
-            TotalInstalledGames: installedCount,
-            GamesPerStore: gamesPerStore,
-            Duration: duration);
+        finally { _syncLock.Release(); }
     }
 }

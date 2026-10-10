@@ -6,9 +6,15 @@ namespace Atrium.Core.Library;
 
 public static class LibraryMerger
 {
-    public static IReadOnlyList<Game> Merge(IEnumerable<ProviderGame> providerGames)
+    public static IReadOnlyList<Game> Merge(IEnumerable<ProviderGame> providerGames, CancellationToken cancellationToken = default)
     {
-        var gamesList = providerGames.ToList();
+        var gamesList = new List<ProviderGame>();
+        cancellationToken.ThrowIfCancellationRequested();
+        foreach (var game in providerGames)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            gamesList.Add(game);
+        }
         if (gamesList.Count == 0) return Array.Empty<Game>();
 
         int n = gamesList.Count;
@@ -45,6 +51,7 @@ public static class LibraryMerger
         // 2. Link by cross-store keys (from Galaxy DB)
         for (int i = 0; i < n; i++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var pg = gamesList[i];
             foreach (var link in pg.CrossStoreReleaseKeys)
             {
@@ -60,6 +67,7 @@ public static class LibraryMerger
         var titleMap = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < n; i++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var norm = NormalizeTitle(gamesList[i].Title);
             if (string.IsNullOrEmpty(norm)) continue;
 
@@ -80,6 +88,7 @@ public static class LibraryMerger
                 {
                     for (int j = i + 1; j < group.Count; j++)
                     {
+                        cancellationToken.ThrowIfCancellationRequested();
                         var a = gamesList[group[i]];
                         var b = gamesList[group[j]];
                         // Merge if from different stores or identical store ID
@@ -109,6 +118,7 @@ public static class LibraryMerger
         var resultGames = new List<Game>();
         foreach (var cluster in clusters.Values)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var primary = cluster.OrderByDescending(c => c.IsInstalled)
                                  .ThenBy(c => c.Store == StoreKind.Steam ? 0 : 1)
                                  .First();

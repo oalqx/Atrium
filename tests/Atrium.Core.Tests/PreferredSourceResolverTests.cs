@@ -7,6 +7,22 @@ namespace Atrium.Core.Tests;
 public class PreferredSourceResolverTests
 {
     [Fact]
+    public void Resolve_UsesGlobalPreference_WithInstalledFallbackAndGameOverride()
+    {
+        var game = new Game { Title = "Portal 2" };
+        game.Sources.Add(new GameSource(StoreKind.Steam, "620", true));
+        game.Sources.Add(new GameSource(StoreKind.Gog, "portal", true));
+        var order = PreferredSourceResolver.CreateStoreOrder(StoreKind.Gog);
+        order.Should().HaveCount(Enum.GetValues<StoreKind>().Length).And.OnlyHaveUniqueItems();
+        PreferredSourceResolver.Resolve(game, order)!.Store.Should().Be(StoreKind.Gog);
+
+        game.Sources[1] = game.Sources[1] with { IsInstalled = false };
+        PreferredSourceResolver.Resolve(game, order)!.Store.Should().Be(StoreKind.Steam);
+        game.User.PreferredStoreOverride = StoreKind.Gog;
+        PreferredSourceResolver.Resolve(game, order)!.Store.Should().Be(StoreKind.Gog);
+    }
+
+    [Fact]
     public void Resolve_ReturnsSingleSource_WhenOnlyOneExists()
     {
         var game = new Game

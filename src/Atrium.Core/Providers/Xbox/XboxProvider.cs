@@ -29,11 +29,13 @@ public sealed class XboxProvider : ILibraryProvider
 
     public async Task<IReadOnlyList<ProviderGame>> GetGamesAsync(CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         var folders = _customXboxFolders ?? LauncherDetector.DetectXboxGamesFolders();
         var results = new List<ProviderGame>();
 
         foreach (var rootFolder in folders)
         {
+            ct.ThrowIfCancellationRequested();
             if (!Directory.Exists(rootFolder)) continue;
 
             var gameDirs = Directory.GetDirectories(rootFolder);
@@ -51,7 +53,7 @@ public sealed class XboxProvider : ILibraryProvider
         // Also query WinRT PackageManager if available
         try
         {
-            var winRtGames = ScanWinRtPackages();
+            var winRtGames = ScanWinRtPackages(ct);
             foreach (var winGame in winRtGames)
             {
                 if (!results.Any(r => r.StoreId.Equals(winGame.StoreId, StringComparison.OrdinalIgnoreCase)))
@@ -60,6 +62,7 @@ public sealed class XboxProvider : ILibraryProvider
                 }
             }
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch { }
 
         return await Task.FromResult(results);
@@ -175,7 +178,7 @@ public sealed class XboxProvider : ILibraryProvider
         }
     }
 
-    private static IReadOnlyList<ProviderGame> ScanWinRtPackages()
+    private static IReadOnlyList<ProviderGame> ScanWinRtPackages(CancellationToken ct)
     {
         var list = new List<ProviderGame>();
         try
@@ -185,6 +188,7 @@ public sealed class XboxProvider : ILibraryProvider
 
             foreach (var pkg in packages)
             {
+                ct.ThrowIfCancellationRequested();
                 try
                 {
                     if (pkg.IsFramework || pkg.IsResourcePackage) continue;
@@ -222,6 +226,7 @@ public sealed class XboxProvider : ILibraryProvider
                 catch { }
             }
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch { }
 
         return list;

@@ -18,8 +18,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [ObservableProperty]
     private string _currentSection = "Library";
 
-    [ObservableProperty]
-    private bool _isGlobalSyncing;
+    public bool IsGlobalSyncing => SourcesVM.IsSyncing;
+    public bool CanSync => SourcesVM.CanEditFolders;
 
     public MainWindowViewModel(
         LibraryDatabase database,
@@ -35,32 +35,48 @@ public sealed partial class MainWindowViewModel : ObservableObject
         SourcesVM = sourcesVM;
         GpuOptimizerVM = gpuOptimizerVM;
         SettingsVM = settingsVM;
+        SourcesVM.SyncCompleted += RefreshLibraryAsync;
+        SourcesVM.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName is nameof(SourcesViewModel.IsSyncing) or nameof(SourcesViewModel.IsEditingFolders))
+            {
+                OnPropertyChanged(nameof(IsGlobalSyncing));
+                OnPropertyChanged(nameof(CanSync));
+                SyncLibraryCommand.NotifyCanExecuteChanged();
+            }
+        };
     }
 
     public async Task InitializeAsync()
     {
-        await _database.InitializeAsync();
-        await SettingsVM.InitializeAsync();
-        await SourcesVM.InitializeAsync();
-        await GpuOptimizerVM.InitializeAsync();
-        await LibraryVM.InitializeAsync();
-    }
-
-    [RelayCommand]
-    public async Task SyncLibraryAsync()
-    {
-        if (IsGlobalSyncing) return;
-
-        IsGlobalSyncing = true;
+        var logPath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Atrium", "startup.log");
         try
         {
-            await SourcesVM.SyncAllAsync();
-            await LibraryVM.LoadGamesAsync();
-            await GpuOptimizerVM.LoadInstalledGamesAsync();
+            System.IO.File.AppendAllText(logPath, "InitializeAsync: Database...\n");
+            await _database.InitializeAsync();
+            System.IO.File.AppendAllText(logPath, "InitializeAsync: SettingsVM...\n");
+            await SettingsVM.InitializeAsync();
+            System.IO.File.AppendAllText(logPath, "InitializeAsync: SourcesVM...\n");
+            await SourcesVM.InitializeAsync();
+            System.IO.File.AppendAllText(logPath, "InitializeAsync: LibraryVM...\n");
+            await LibraryVM.InitializeAsync();
+            System.IO.File.AppendAllText(logPath, "InitializeAsync: GpuOptimizerVM...\n");
+            await GpuOptimizerVM.InitializeAsync();
+            System.IO.File.AppendAllText(logPath, "InitializeAsync: Complete!\n");
         }
-        finally
+        catch (Exception ex)
         {
-            IsGlobalSyncing = false;
+            System.IO.File.AppendAllText(logPath, $"EXCEPTION in InitializeAsync:\n{ex}\n");
+            LibraryVM.StatusMessage = $"Startup could not complete: {ex.Message}";
         }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanSync))]
+    public Task SyncLibraryAsync() => SourcesVM.SyncAllAsync();
+
+    private async Task RefreshLibraryAsync()
+    {
+        await LibraryVM.LoadGamesAsync();
+        await GpuOptimizerVM.LoadInstalledGamesAsync();
     }
 }

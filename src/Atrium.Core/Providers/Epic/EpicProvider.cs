@@ -30,6 +30,7 @@ public sealed class EpicProvider : ILibraryProvider
 
     public async Task<IReadOnlyList<ProviderGame>> GetGamesAsync(CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         var manifestsPath = _customManifestsPath ?? LauncherDetector.DetectEpicManifestsPath();
         if (string.IsNullOrEmpty(manifestsPath) || !Directory.Exists(manifestsPath))
         {
@@ -88,6 +89,7 @@ public sealed class EpicProvider : ILibraryProvider
                     Artwork = artwork
                 });
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch
             {
                 // Continue on individual malformed manifest

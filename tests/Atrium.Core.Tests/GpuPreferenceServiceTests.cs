@@ -8,7 +8,7 @@ namespace Atrium.Core.Tests;
 
 public class GpuPreferenceServiceTests : IDisposable
 {
-    private const string TestSubKey = @"Software\AtriumTests\DirectX";
+    private readonly string _testSubKey = @"Software\AtriumTests\" + Guid.NewGuid().ToString("N");
     private readonly string _testDbPath;
     private readonly string _fakeExePath;
 
@@ -33,7 +33,7 @@ public class GpuPreferenceServiceTests : IDisposable
 
         try
         {
-            Registry.CurrentUser.DeleteSubKeyTree(@"Software\AtriumTests", false);
+            Registry.CurrentUser.DeleteSubKeyTree(_testSubKey, false);
         }
         catch { }
     }
@@ -44,7 +44,7 @@ public class GpuPreferenceServiceTests : IDisposable
         using var db = new LibraryDatabase(_testDbPath);
         await db.InitializeAsync();
 
-        var service = new GpuPreferenceService(db, TestSubKey);
+        var service = new GpuPreferenceService(db, _testSubKey);
 
         // Initially no preference
         service.GetPreference(_fakeExePath).Should().BeNull();
@@ -62,5 +62,59 @@ public class GpuPreferenceServiceTests : IDisposable
 
         var afterRevert = await service.GetModifiedExePathsAsync();
         afterRevert.Should().NotContain(Path.GetFullPath(_fakeExePath));
+    }
+
+    [Fact]
+    public async Task Revert_LeavesExternalPreferencesUntouched_WhenThereIsNoBackup()
+    {
+        using var db = new LibraryDatabase(_testDbPath);
+        await db.InitializeAsync();
+        var service = new GpuPreferenceService(db, _testSubKey);
+        using var key = Registry.CurrentUser.CreateSubKey(_testSubKey);
+        key.SetValue(_fakeExePath, "GpuPreference=2;CustomFlag=1;");
+
+        await service.RevertAsync(_fakeExePath);
+        await service.SetHighPerformanceAsync(_fakeExePath);
+
+        key.GetValue(_fakeExePath).Should().Be("GpuPreference=2;CustomFlag=1;");
+        (await service.GetModifiedExePathsAsync()).Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("GpuPreference=1;CustomFlag=1;")]
+    [InlineData("")]
+    public async Task RepeatedOptimization_RestoresTheExactOriginalValue(string original)
+    {
+        using var db = new LibraryDatabase(_testDbPath);
+        await db.InitializeAsync();
+        var service = new GpuPreferenceService(db, _testSubKey);
+        using var key = Registry.CurrentUser.CreateSubKey(_testSubKey);
+        key.SetValue(_fakeExePath, original);
+
+        await Task.WhenAll(service.SetHighPerformanceAsync(_fakeExePath), service.SetHighPerformanceAsync(_fakeExePath));
+        if (original.Contains("CustomFlag"))
+            key.GetValue(_fakeExePath)!.ToString().Should().Contain("CustomFlag=1;");
+        await service.RevertAsync(_fakeExePath);
+
+        key.GetValue(_fakeExePath).Should().Be(original);
+        (await service.GetModifiedExePathsAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task FailedRegistryRestore_KeepsTheBackupForRetry()
+    {
+        using var db = new LibraryDatabase(_testDbPath);
+        await db.InitializeAsync();
+        var service = new GpuPreferenceService(db, _testSubKey);
+        await service.SetHighPerformanceAsync(_fakeExePath);
+        // Windows rejects registry key segments longer than 255 characters.
+        var invalidRegistry = new GpuPreferenceService(db, new string('x', 256));
+        Func<Task> restore = () => invalidRegistry.RevertAsync(_fakeExePath);
+
+        await restore.Should().ThrowAsync<ArgumentException>();
+
+        (await service.GetModifiedExePathsAsync()).Should().Contain(Path.GetFullPath(_fakeExePath));
+        await service.RevertAsync(_fakeExePath);
+        (await service.GetModifiedExePathsAsync()).Should().BeEmpty();
     }
 }

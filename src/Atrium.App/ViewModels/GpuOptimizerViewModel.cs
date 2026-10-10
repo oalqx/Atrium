@@ -16,30 +16,57 @@ public sealed partial class GameGpuItemViewModel : ObservableObject
     public StoreKind Store { get; }
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanChangePreference))]
+    [NotifyPropertyChangedFor(nameof(PreferenceDescription))]
     private bool _isHighPerformance;
 
-    public GameGpuItemViewModel(string title, string exePath, StoreKind store, bool isHighPerf, GpuPreferenceService gpuService)
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanChangePreference))]
+    [NotifyPropertyChangedFor(nameof(PreferenceDescription))]
+    private bool _isManagedByAtrium;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanChangePreference))]
+    private bool _isChangingPreference;
+
+    [ObservableProperty]
+    private string _errorMessage = string.Empty;
+
+    public bool CanChangePreference => !IsChangingPreference && (!IsHighPerformance || IsManagedByAtrium);
+    public string PreferenceDescription => IsManagedByAtrium ? "Managed by Atrium" :
+        IsHighPerformance ? "Already configured in Windows" : "Using Windows graphics preference";
+
+    public GameGpuItemViewModel(string title, string exePath, StoreKind store, bool isHighPerf, GpuPreferenceService gpuService, bool isManagedByAtrium = false)
     {
         Title = title;
         ExePath = exePath;
         Store = store;
         _isHighPerformance = isHighPerf;
         _gpuService = gpuService;
+        _isManagedByAtrium = isManagedByAtrium;
     }
 
     [RelayCommand]
     public async Task ToggleGpuPreferenceAsync()
     {
-        if (IsHighPerformance)
+        if (!CanChangePreference) return;
+        IsChangingPreference = true;
+        ErrorMessage = string.Empty;
+        try
         {
-            await _gpuService.RevertAsync(ExePath);
-            IsHighPerformance = false;
+            if (IsHighPerformance)
+                await _gpuService.RevertAsync(ExePath);
+            else
+                await _gpuService.SetHighPerformanceAsync(ExePath);
+            var modified = await _gpuService.GetModifiedExePathsAsync();
+            IsManagedByAtrium = modified.Contains(Path.GetFullPath(ExePath), StringComparer.OrdinalIgnoreCase);
+            IsHighPerformance = _gpuService.GetPreference(ExePath) == GpuPreference.HighPerformance;
         }
-        else
+        catch (Exception ex)
         {
-            await _gpuService.SetHighPerformanceAsync(ExePath);
-            IsHighPerformance = true;
+            ErrorMessage = $"Could not change GPU preference: {ex.Message}";
         }
+        finally { IsChangingPreference = false; }
     }
 }
 
@@ -73,7 +100,11 @@ public sealed partial class GpuOptimizerViewModel : ObservableObject
     private string _statusMessage = string.Empty;
 
     [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(OptimizeAllGamesCommand))]
+    [NotifyCanExecuteChangedFor(nameof(RevertAllCommand))]
     private bool _isOptimizing;
+
+    private bool CanOptimize() => !IsOptimizing;
 
     public ObservableCollection<GameGpuItemViewModel> InstalledGameItems { get; } = [];
 
@@ -85,20 +116,18 @@ public sealed partial class GpuOptimizerViewModel : ObservableObject
 
     public async Task InitializeAsync()
     {
-        DetectHardware();
+        ApplyHardware(await Task.Run(HardwareService.Detect));
         await LoadInstalledGamesAsync();
     }
 
-    public void DetectHardware()
+    private void ApplyHardware(HardwareInfo hw)
     {
-        var hw = HardwareService.Detect();
-
         CpuName = hw.CpuName;
         RamText = $"{hw.TotalRamGigabytes} GB RAM";
         DisplayText = $"{hw.PrimaryDisplay.Width}x{hw.PrimaryDisplay.Height} @ {hw.PrimaryDisplay.RefreshRateHz}Hz";
 
         var discrete = hw.Gpus.FirstOrDefault(g => g.IsHighPerformance) ?? hw.Gpus.FirstOrDefault();
-        var integrated = hw.Gpus.FirstOrDefault(g => !g.IsHighPerformance);
+        var integrated = hw.Gpus.FirstOrDefault(g => !g.IsHighPerformance && g != discrete);
 
         if (discrete != null)
         {
@@ -122,11 +151,17 @@ public sealed partial class GpuOptimizerViewModel : ObservableObject
     {
         InstalledGameItems.Clear();
         var games = await _database.GetAllGamesAsync();
+        var modified = (await _gpuService.GetModifiedExePathsAsync()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var savedStore = await _database.GetSettingAsync("PreferredStore", "Steam");
+        var preferredStore = Enum.TryParse<StoreKind>(savedStore, out var store) ? store : StoreKind.Steam;
+        var storeOrder = PreferredSourceResolver.CreateStoreOrder(preferredStore);
 
         foreach (var g in games.Where(g => g.IsInstalled))
         {
-            var primary = PreferredSourceResolver.Resolve(g);
-            var exe = primary?.ExecutablePath ?? g.Sources.FirstOrDefault(s => !string.IsNullOrEmpty(s.ExecutablePath))?.ExecutablePath;
+            var primary = PreferredSourceResolver.Resolve(g, storeOrder);
+            var source = primary is { IsInstalled: true } && File.Exists(primary.ExecutablePath)
+                ? primary : g.Sources.FirstOrDefault(s => s.IsInstalled && File.Exists(s.ExecutablePath));
+            var exe = source?.ExecutablePath;
 
             if (!string.IsNullOrEmpty(exe) && File.Exists(exe))
             {
@@ -136,9 +171,10 @@ public sealed partial class GpuOptimizerViewModel : ObservableObject
                 InstalledGameItems.Add(new GameGpuItemViewModel(
                     title: g.Title,
                     exePath: exe,
-                    store: primary?.Store ?? StoreKind.Local,
+                    store: source!.Store,
                     isHighPerf: isHigh,
-                    gpuService: _gpuService));
+                    gpuService: _gpuService,
+                    isManagedByAtrium: modified.Contains(Path.GetFullPath(exe))));
             }
         }
 
@@ -146,43 +182,56 @@ public sealed partial class GpuOptimizerViewModel : ObservableObject
         StatusMessage = $"{InstalledGameItems.Count} games with verified executables ({optimizedCount} forced to high-performance GPU).";
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanOptimize))]
     public async Task OptimizeAllGamesAsync()
     {
+        if (IsOptimizing) return;
         IsOptimizing = true;
-        StatusMessage = "Enforcing High-Performance GPU for all installed games...";
-
-        int count = 0;
-        foreach (var item in InstalledGameItems)
+        StatusMessage = "Setting high-performance GPU preferences...";
+        int count = 0, failed = 0;
+        string? firstError = null;
+        try
         {
-            if (!item.IsHighPerformance)
+            foreach (var item in InstalledGameItems.ToList())
             {
-                await _gpuService.SetHighPerformanceAsync(item.ExePath);
-                item.IsHighPerformance = true;
-                count++;
+                try
+                {
+                    if (await _gpuService.SetHighPerformanceAsync(item.ExePath)) count++;
+                }
+                catch (Exception ex) { failed++; firstError ??= ex.Message; }
             }
+            await LoadInstalledGamesAsync();
+            StatusMessage = failed == 0 ? $"Updated {count} GPU preferences." :
+                $"Updated {count} preferences; {failed} failed. {firstError}";
         }
-
-        IsOptimizing = false;
-        StatusMessage = $"Successfully optimized {count} new games! All {InstalledGameItems.Count} games now set to High-Performance GPU.";
+        catch (Exception ex) { StatusMessage = $"Could not complete optimization: {ex.Message}"; }
+        finally { IsOptimizing = false; }
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanOptimize))]
     public async Task RevertAllAsync()
     {
+        if (IsOptimizing) return;
         IsOptimizing = true;
-        StatusMessage = "Reverting GPU preferences to previous system state...";
-
-        foreach (var item in InstalledGameItems)
+        StatusMessage = "Restoring preferences changed by Atrium...";
+        int count = 0, failed = 0;
+        string? firstError = null;
+        try
         {
-            if (item.IsHighPerformance)
+            // Include backed-up executables even when the game was uninstalled.
+            foreach (var path in await _gpuService.GetModifiedExePathsAsync())
             {
-                await _gpuService.RevertAsync(item.ExePath);
-                item.IsHighPerformance = false;
+                try
+                {
+                    if (await _gpuService.RevertAsync(path)) count++;
+                }
+                catch (Exception ex) { failed++; firstError ??= ex.Message; }
             }
+            await LoadInstalledGamesAsync();
+            StatusMessage = failed == 0 ? $"Restored {count} preferences changed by Atrium." :
+                $"Restored {count} preferences; {failed} failed and their backups were kept. {firstError}";
         }
-
-        IsOptimizing = false;
-        StatusMessage = "All GPU preferences safely reverted to original defaults.";
+        catch (Exception ex) { StatusMessage = $"Could not complete rollback: {ex.Message}"; }
+        finally { IsOptimizing = false; }
     }
 }

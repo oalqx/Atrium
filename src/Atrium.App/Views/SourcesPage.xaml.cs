@@ -19,8 +19,7 @@ public sealed partial class SourcesPage : Page
         var text = NewFolderInput.Text?.Trim();
         if (!string.IsNullOrEmpty(text))
         {
-            await ViewModel.AddCustomFolderAsync(text);
-            NewFolderInput.Text = string.Empty;
+            if (await ViewModel.AddCustomFolderAsync(text)) NewFolderInput.Text = string.Empty;
         }
     }
 

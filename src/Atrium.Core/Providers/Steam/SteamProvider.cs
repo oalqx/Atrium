@@ -42,6 +42,7 @@ public sealed class SteamProvider : ILibraryProvider
 
     public async Task<IReadOnlyList<ProviderGame>> GetGamesAsync(CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         var steamPath = _customSteamPath ?? LauncherDetector.DetectSteamPath();
         if (string.IsNullOrEmpty(steamPath) || !Directory.Exists(steamPath))
         {
@@ -56,6 +57,7 @@ public sealed class SteamProvider : ILibraryProvider
 
         foreach (var libraryPath in libraryFolders)
         {
+            ct.ThrowIfCancellationRequested();
             var steamapps = Path.Combine(libraryPath, "steamapps");
             if (!Directory.Exists(steamapps))
             {

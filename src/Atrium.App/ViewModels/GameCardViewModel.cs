@@ -1,14 +1,18 @@
-using System.Diagnostics;
 using Atrium.Core.Models;
 using Atrium.Core.Storage;
+using Atrium.Core.System;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
 namespace Atrium.App.ViewModels;
 
+public sealed record StorePreferenceOption(StoreKind? Store, string Label);
+
 public sealed partial class GameCardViewModel : ObservableObject
 {
     private readonly LibraryDatabase _database;
+    private readonly IGameLaunchService _launcher;
+    private IReadOnlyList<StoreKind>? _storeOrder;
 
     public Game Game { get; }
 
@@ -18,14 +22,50 @@ public sealed partial class GameCardViewModel : ObservableObject
     [ObservableProperty]
     private bool _isInstalled;
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HideActionLabel))]
+    private bool _isHidden;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanEdit))]
+    [NotifyCanExecuteChangedFor(nameof(ToggleFavoriteCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ToggleHiddenCommand))]
+    [NotifyCanExecuteChangedFor(nameof(SavePreferredStoreCommand))]
+    private bool _isSaving;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(SavePreferredStoreCommand))]
+    private StorePreferenceOption? _pendingStorePreference;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasActionMessage))]
+    private string _actionMessage = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasCover))]
+    private bool _coverLoadFailed;
+
     public Guid Id => Game.Id;
     public string Title => Game.Title;
     public string? CoverUrl => Game.Artwork.EffectiveCover;
+    public Uri? CoverUri => ArtworkUriResolver.Resolve(CoverUrl);
     public string? BackgroundUrl => Game.Artwork.EffectiveBackground;
-    public bool HasCover => !string.IsNullOrEmpty(CoverUrl);
+    public bool HasCover => CoverUri != null && !CoverLoadFailed;
     public int PlaytimeMinutes => Game.TotalPlaytimeMinutes;
     public IReadOnlyList<GameSource> Sources => Game.Sources;
-    public GameSource? PrimarySource => PreferredSourceResolver.Resolve(Game);
+    public GameSource? PrimarySource => PreferredSourceResolver.Resolve(Game, _storeOrder);
+
+    public bool CanEdit => !IsSaving;
+    public bool CanSavePreference => CanEdit && PendingStorePreference != null &&
+        PendingStorePreference.Store != Game.User.PreferredStoreOverride;
+    public bool HasActionMessage => !string.IsNullOrEmpty(ActionMessage);
+    public string HideActionLabel => IsHidden ? "Restore to library" : "Hide from library";
+    public string FavoriteActionLabel => IsFavorite ? "Remove favorite" : "Add favorite";
+    public string LaunchActionLabel => $"Open via {PrimaryStoreName}";
+    public string InstallationStatus => IsInstalled ? "Installed" : "Not installed";
+    public IReadOnlyList<StorePreferenceOption> StorePreferences { get; }
+    public StorePreferenceOption SelectedStorePreference =>
+        StorePreferences.FirstOrDefault(p => p.Store == Game.User.PreferredStoreOverride) ?? StorePreferences[0];
 
     public string PrimaryStoreName => PrimarySource != null ? PrimarySource.Store switch
     {
@@ -40,56 +80,112 @@ public sealed partial class GameCardViewModel : ObservableObject
     public IReadOnlyList<StoreKind> AvailableStores =>
         Game.Sources.Select(s => s.Store).Distinct().ToList();
 
-    public GameCardViewModel(Game game, LibraryDatabase database)
+    public GameCardViewModel(Game game, LibraryDatabase database, IReadOnlyList<StoreKind>? storeOrder = null,
+        IGameLaunchService? launcher = null)
     {
         Game = game;
         _database = database;
+        _launcher = launcher ?? new GameLaunchService();
+        _storeOrder = storeOrder;
         _isFavorite = game.User.Favorite;
         _isInstalled = game.IsInstalled;
+        _isHidden = game.User.Hidden;
+        StorePreferences = new[] { new StorePreferenceOption(null, "Follow library preference") }
+            .Concat(game.Sources.Select(s => s.Store).Distinct()
+                .Select(store => new StorePreferenceOption(store, StoreName(store)))).ToArray();
+        _pendingStorePreference = SelectedStorePreference;
     }
 
-    [RelayCommand]
+    public void UpdateStoreOrder(IReadOnlyList<StoreKind> storeOrder)
+    {
+        _storeOrder = storeOrder;
+        NotifyLaunchSourceChanged();
+    }
+
+    partial void OnIsFavoriteChanged(bool value) => OnPropertyChanged(nameof(FavoriteActionLabel));
+
+    private void NotifyLaunchSourceChanged()
+    {
+        OnPropertyChanged(nameof(PrimarySource));
+        OnPropertyChanged(nameof(PrimaryStoreName));
+        OnPropertyChanged(nameof(LaunchActionLabel));
+        OnPropertyChanged(nameof(SelectedStorePreference));
+    }
+
+    private static string StoreName(StoreKind store) => store switch
+    {
+        StoreKind.Steam => "Steam",
+        StoreKind.Epic => "Epic Games",
+        StoreKind.Gog => "GOG",
+        StoreKind.Xbox => "Xbox",
+        StoreKind.Local => "Local PC",
+        _ => store.ToString()
+    };
+
+    [RelayCommand(CanExecute = nameof(CanEdit))]
     public async Task ToggleFavoriteAsync()
     {
-        IsFavorite = !IsFavorite;
-        Game.User.Favorite = IsFavorite;
-        await _database.SetFavoriteAsync(Game.Id, IsFavorite);
+        if (IsSaving) return;
+        IsSaving = true;
+        ActionMessage = string.Empty;
+        try
+        {
+            var value = !IsFavorite;
+            await _database.SetFavoriteAsync(Game.Id, value);
+            Game.User.Favorite = value;
+            IsFavorite = value;
+        }
+        catch (Exception ex) { ActionMessage = $"Could not save favorite: {ex.Message}"; }
+        finally { IsSaving = false; }
     }
+
+    [RelayCommand(CanExecute = nameof(CanEdit))]
+    public async Task ToggleHiddenAsync()
+    {
+        if (IsSaving) return;
+        IsSaving = true;
+        ActionMessage = string.Empty;
+        try
+        {
+            var value = !IsHidden;
+            await _database.SetHiddenAsync(Game.Id, value);
+            Game.User.Hidden = value;
+            IsHidden = value;
+            ActionMessage = value ? "Game hidden. Find it in the Hidden filter to restore it." : "Game restored to your library.";
+        }
+        catch (Exception ex) { ActionMessage = $"Could not save visibility: {ex.Message}"; }
+        finally { IsSaving = false; }
+    }
+
+    public async Task SetPreferredStoreAsync(StorePreferenceOption? option)
+    {
+        if (option == null || !StorePreferences.Contains(option) || IsSaving ||
+            option.Store == Game.User.PreferredStoreOverride) return;
+        IsSaving = true;
+        ActionMessage = string.Empty;
+        try
+        {
+            await _database.SetPreferredStoreAsync(Game.Id, option.Store);
+            Game.User.PreferredStoreOverride = option.Store;
+        }
+        catch (Exception ex) { ActionMessage = $"Could not save launcher preference: {ex.Message}"; }
+        finally
+        {
+            PendingStorePreference = SelectedStorePreference;
+            NotifyLaunchSourceChanged();
+            IsSaving = false;
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanSavePreference))]
+    public Task SavePreferredStoreAsync() => SetPreferredStoreAsync(PendingStorePreference);
 
     [RelayCommand]
     public void Launch()
     {
         var target = PrimarySource;
-        if (target == null) return;
-
-        LaunchSource(target);
-    }
-
-    public static void LaunchSource(GameSource source)
-    {
-        try
-        {
-            if (!string.IsNullOrEmpty(source.LaunchUri))
-            {
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = source.LaunchUri,
-                    UseShellExecute = true
-                });
-                return;
-            }
-
-            if (!string.IsNullOrEmpty(source.ExecutablePath) && File.Exists(source.ExecutablePath))
-            {
-                var workDir = Path.GetDirectoryName(source.ExecutablePath);
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = source.ExecutablePath,
-                    WorkingDirectory = workDir,
-                    UseShellExecute = true
-                });
-            }
-        }
-        catch { }
+        ActionMessage = target == null
+            ? "No launcher is linked to this game. Sync your library to refresh its sources."
+            : _launcher.Launch(target).Message;
     }
 }

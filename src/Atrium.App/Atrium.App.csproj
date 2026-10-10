@@ -29,4 +29,11 @@
   <ItemGroup>
     <ProjectReference Include="..\Atrium.Core\Atrium.Core.csproj" />
   </ItemGroup>
+
+  <PropertyGroup Condition="'$(UiSmokeTest)' == 'true'">
+    <DefineConstants>$(DefineConstants);UI_SMOKE_TEST</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(UiSmokeTest)' == 'true'">
+    <Compile Include="../../tests/Atrium.UiSmoke/LibrarySmokeTest.cs" Link="Diagnostics/LibrarySmokeTest.cs" />
+  </ItemGroup>
 </Project>

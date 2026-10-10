@@ -126,26 +126,47 @@ public static class HardwareService
 
     private static DisplayInfo DetectPrimaryDisplay()
     {
+        int width = 1920;
+        int height = 1080;
+        int refreshRate = 60;
+
         try
         {
-            var devMode = new DEVMODE();
-            devMode.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
-            if (EnumDisplaySettings(null, ENUM_CURRENT_SETTINGS, ref devMode))
+            var w = GetSystemMetrics(0);
+            var h = GetSystemMetrics(1);
+            if (w > 0 && h > 0)
             {
-                return new DisplayInfo(devMode.dmPelsWidth, devMode.dmPelsHeight, devMode.dmDisplayFrequency);
+                width = w;
+                height = h;
             }
         }
         catch { }
 
-        return new DisplayInfo(1920, 1080, 60);
+        try
+        {
+            var devMode = new DEVMODE();
+            devMode.dmSize = (short)Marshal.SizeOf<DEVMODE>();
+            if (EnumDisplaySettings(null, ENUM_CURRENT_SETTINGS, ref devMode))
+            {
+                if (devMode.dmPelsWidth > 0) width = devMode.dmPelsWidth;
+                if (devMode.dmPelsHeight > 0) height = devMode.dmPelsHeight;
+                if (devMode.dmDisplayFrequency > 0) refreshRate = devMode.dmDisplayFrequency;
+            }
+        }
+        catch { }
+
+        return new DisplayInfo(width, height, refreshRate);
     }
 
     private const int ENUM_CURRENT_SETTINGS = -1;
 
     [DllImport("user32.dll")]
+    private static extern int GetSystemMetrics(int nIndex);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern bool EnumDisplaySettings(string? deviceName, int modeNum, ref DEVMODE devMode);
 
-    [StructLayout(LayoutKind.Sequential)]
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct DEVMODE
     {
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
@@ -167,7 +188,7 @@ public static class HardwareService
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
         public string dmFormName;
         public short dmLogPixels;
-        public short dmBitsPerPel;
+        public int dmBitsPerPel;
         public int dmPelsWidth;
         public int dmPelsHeight;
         public int dmDisplayFlags;

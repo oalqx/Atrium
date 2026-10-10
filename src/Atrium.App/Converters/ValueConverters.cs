@@ -4,9 +4,24 @@ using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Data;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.UI;
 
 namespace Atrium.App.Converters;
+
+public sealed class ArtworkImageConverter : IValueConverter
+{
+    public object? Convert(object value, Type targetType, object parameter, string language)
+    {
+        if (value is not Uri uri) return null;
+        try { return new BitmapImage(uri); }
+        catch (ArgumentException) { return null; }
+        catch (System.Runtime.InteropServices.COMException) { return null; }
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language) =>
+        throw new NotImplementedException();
+}
 
 public sealed class PlaytimeFormatterConverter : IValueConverter
 {
@@ -24,9 +39,16 @@ public sealed class PlaytimeFormatterConverter : IValueConverter
     }
 
     public object ConvertBack(object value, Type targetType, object parameter, string language) =>
-        throw novel();
+        throw new NotImplementedException();
+}
 
-    private static NotImplementedException novel() => new();
+public sealed class InverseBoolConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, string language) =>
+        value is bool b && !b;
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language) =>
+        throw new NotImplementedException();
 }
 
 public sealed class StoreBadgeConverter : IValueConverter
@@ -105,6 +127,24 @@ public sealed class InverseBoolToVisibilityConverter : IValueConverter
             return b ? Visibility.Collapsed : Visibility.Visible;
         }
         return Visibility.Visible;
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language) =>
+        throw new NotImplementedException();
+}
+
+public sealed class FavoriteBrushConverter : IValueConverter
+{
+    private static readonly SolidColorBrush GoldBrush = new(Color.FromArgb(255, 255, 215, 0));
+    private static readonly SolidColorBrush GrayBrush = new(Color.FromArgb(200, 200, 200, 200));
+
+    public object Convert(object value, Type targetType, object parameter, string language)
+    {
+        if (value is bool isFav && isFav)
+        {
+            return GoldBrush;
+        }
+        return GrayBrush;
     }
 
     public object ConvertBack(object value, Type targetType, object parameter, string language) =>

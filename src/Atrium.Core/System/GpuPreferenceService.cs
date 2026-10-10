@@ -1,6 +1,5 @@
 using Atrium.Core.Storage;
 using Dapper;
-using Microsoft.Data.Sqlite;
 using Microsoft.Win32;
 
 namespace Atrium.Core.System;
@@ -17,6 +16,7 @@ public sealed class GpuPreferenceService
     private const string DefaultRegistryKeyPath = @"Software\Microsoft\DirectX\UserGpuPreferences";
     private readonly string _registryKeyPath;
     private readonly LibraryDatabase _database;
+    private readonly SemaphoreSlim _mutationLock = new(1, 1);
 
     public GpuPreferenceService(LibraryDatabase database, string? customRegistryKeyPath = null)
     {
@@ -29,100 +29,89 @@ public sealed class GpuPreferenceService
         try
         {
             using var key = Registry.CurrentUser.OpenSubKey(_registryKeyPath);
-            var val = key?.GetValue(exePath) as string;
-            if (string.IsNullOrEmpty(val)) return null;
-
-            if (val.Contains("GpuPreference=2")) return GpuPreference.HighPerformance;
-            if (val.Contains("GpuPreference=1")) return GpuPreference.PowerSaving;
-            if (val.Contains("GpuPreference=0")) return GpuPreference.Default;
+            return ParsePreference(key?.GetValue(Path.GetFullPath(exePath)) as string);
         }
         catch { }
 
         return null;
     }
 
-    public async Task SetHighPerformanceAsync(string exePath)
+    private static GpuPreference? ParsePreference(string? value)
     {
-        if (string.IsNullOrWhiteSpace(exePath) || !File.Exists(exePath))
+        foreach (var part in (value ?? string.Empty).Split(';', StringSplitOptions.RemoveEmptyEntries))
         {
-            return;
+            var pair = part.Split('=', 2, StringSplitOptions.TrimEntries);
+            if (pair.Length == 2 && pair[0].Equals("GpuPreference", StringComparison.OrdinalIgnoreCase)
+                && int.TryParse(pair[1], out var number) && Enum.IsDefined(typeof(GpuPreference), number))
+                return (GpuPreference)number;
         }
+        return null;
+    }
 
+    public async Task<bool> SetHighPerformanceAsync(string exePath)
+    {
+        if (string.IsNullOrWhiteSpace(exePath) || !File.Exists(exePath)) return false;
         var normalizedPath = Path.GetFullPath(exePath);
-
-        // 1. Check existing registry value
-        string? existingValue = null;
-        using (var key = Registry.CurrentUser.OpenSubKey(_registryKeyPath))
+        await _mutationLock.WaitAsync();
+        try
         {
-            existingValue = key?.GetValue(normalizedPath) as string;
-        }
+            using var key = Registry.CurrentUser.CreateSubKey(_registryKeyPath);
+            var existingValue = key.GetValue(normalizedPath) as string;
+            // Do not take ownership of a preference already configured in Windows.
+            if (ParsePreference(existingValue) == GpuPreference.HighPerformance) return false;
 
-        // 2. Backup to database if not already backed up
-        using (var conn = new SqliteConnection($"Data Source={_database.DatabasePath}"))
-        {
+            using var conn = _database.CreateConnection();
             await conn.OpenAsync();
-            var exists = await conn.ExecuteScalarAsync<int>(
-                "SELECT COUNT(*) FROM GpuPreferences WHERE ExePath = @Path",
-                new { Path = normalizedPath });
+            await conn.ExecuteAsync(@"
+                INSERT INTO GpuPreferences (ExePath, PreviousValue, AppliedAt)
+                VALUES (@Path, @Prev, @Now)
+                ON CONFLICT(ExePath) DO NOTHING;",
+                new { Path = normalizedPath, Prev = existingValue, Now = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
 
-            if (exists == 0)
-            {
-                await conn.ExecuteAsync(@"
-                    INSERT INTO GpuPreferences (ExePath, PreviousValue, AppliedAt)
-                    VALUES (@Path, @Prev, @Now)",
-                    new
-                    {
-                        Path = normalizedPath,
-                        Prev = existingValue,
-                        Now = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
-                    });
-            }
+            var otherSettings = (existingValue ?? string.Empty).Split(';', StringSplitOptions.RemoveEmptyEntries)
+                .Where(part => !part.Split('=', 2)[0].Trim().Equals("GpuPreference", StringComparison.OrdinalIgnoreCase));
+            key.SetValue(normalizedPath, string.Join(';', otherSettings.Append("GpuPreference=2")) + ";");
+            return true;
         }
-
-        // 3. Write HighPerformance setting (GpuPreference=2;)
-        using (var writeKey = Registry.CurrentUser.CreateSubKey(_registryKeyPath))
+        finally
         {
-            writeKey.SetValue(normalizedPath, "GpuPreference=2;");
+            _mutationLock.Release();
         }
     }
 
-    public async Task RevertAsync(string exePath)
+    public async Task<bool> RevertAsync(string exePath)
     {
         var normalizedPath = Path.GetFullPath(exePath);
-
-        string? previousValue = null;
-        bool hasBackup = false;
-
-        using (var conn = new SqliteConnection($"Data Source={_database.DatabasePath}"))
+        await _mutationLock.WaitAsync();
+        try
         {
+            using var conn = _database.CreateConnection();
             await conn.OpenAsync();
             var row = await conn.QueryFirstOrDefaultAsync<dynamic>(
                 "SELECT PreviousValue FROM GpuPreferences WHERE ExePath = @Path",
                 new { Path = normalizedPath });
+            if (row == null) return false;
 
-            if (row != null)
-            {
-                hasBackup = true;
-                previousValue = (string?)row.PreviousValue;
-                await conn.ExecuteAsync("DELETE FROM GpuPreferences WHERE ExePath = @Path", new { Path = normalizedPath });
-            }
-        }
+            string? previousValue = (string?)row.PreviousValue;
+            using var key = Registry.CurrentUser.CreateSubKey(_registryKeyPath);
+            if (previousValue != null)
+                key.SetValue(normalizedPath, previousValue);
+            else
+                key.DeleteValue(normalizedPath, false);
 
-        // Restore or delete registry entry
-        using var writeKey = Registry.CurrentUser.CreateSubKey(_registryKeyPath);
-        if (hasBackup && !string.IsNullOrEmpty(previousValue))
-        {
-            writeKey.SetValue(normalizedPath, previousValue);
+            // A failed registry restore must leave the backup available for retry.
+            await conn.ExecuteAsync("DELETE FROM GpuPreferences WHERE ExePath = @Path", new { Path = normalizedPath });
+            return true;
         }
-        else
+        finally
         {
-            writeKey.DeleteValue(normalizedPath, false);
+            _mutationLock.Release();
         }
     }
 
     public async Task<IReadOnlyList<string>> GetModifiedExePathsAsync()
     {
-        using var conn = new SqliteConnection($"Data Source={_database.DatabasePath}");
+        using var conn = _database.CreateConnection();
         await conn.OpenAsync();
         var paths = await conn.QueryAsync<string>("SELECT ExePath FROM GpuPreferences");
         return paths.ToList();

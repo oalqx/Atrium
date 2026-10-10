@@ -8,27 +8,39 @@
     xmlns:converters="using:Atrium.App.Converters"
     mc:Ignorable="d">
 
+    <Page.KeyboardAccelerators>
+        <KeyboardAccelerator Key="F" Modifiers="Control" Invoked="OnSearchShortcut" />
+        <KeyboardAccelerator Key="Escape" Invoked="OnEscapeShortcut" />
+    </Page.KeyboardAccelerators>
+
     <Page.Resources>
         <converters:PlaytimeFormatterConverter x:Key="PlaytimeConverter" />
         <converters:StoreBadgeConverter x:Key="StoreBadgeConverter" />
         <converters:StoreNameConverter x:Key="StoreNameConverter" />
         <converters:BoolToVisibilityConverter x:Key="BoolToVisibility" />
         <converters:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibility" />
+        <converters:InverseBoolConverter x:Key="InverseBool" />
+        <converters:FavoriteBrushConverter x:Key="FavoriteBrushConverter" />
+        <converters:ArtworkImageConverter x:Key="ArtworkImageConverter" />
     </Page.Resources>
 
-    <Grid RowDefinitions="Auto,*">
+    <Grid RowDefinitions="Auto,*" SizeChanged="OnLibrarySizeChanged">
         <!-- Header Controls Bar -->
-        <Grid Grid.Row="0" Margin="24,16,24,16">
+        <ContentControl Grid.Row="0" Margin="24,16,24,16" HorizontalContentAlignment="Stretch"
+              IsEnabled="{x:Bind ViewModel.IsDetailsOpen, Mode=OneWay, Converter={StaticResource InverseBool}}">
+        <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
             <!-- Search and Controls -->
-            <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="12">
+            <Grid Grid.Row="0" ColumnDefinitions="*,*,*" RowDefinitions="Auto,Auto" ColumnSpacing="12" RowSpacing="12">
                 <!-- Search Box -->
                 <TextBox Grid.Column="0" 
-                         Width="300"
+                         x:Name="SearchBox"
+                         HorizontalAlignment="Stretch"
+                         AutomationProperties.Name="Search games"
                          PlaceholderText="Search games..."
                          Text="{x:Bind ViewModel.SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
                     <TextBox.Header>
@@ -37,18 +49,18 @@
                 </TextBox>
 
                 <!-- Filter Combo -->
-                <ComboBox Grid.Column="2"
-                          Width="160"
+                <ComboBox Grid.Column="1" x:Name="FilterBox"
+                          HorizontalAlignment="Stretch"
                           ItemsSource="{x:Bind ViewModel.FilterOptions}"
                           SelectedItem="{x:Bind ViewModel.SelectedFilter, Mode=TwoWay}">
                     <ComboBox.Header>
-                        <TextBlock Text="Filter Store" FontWeight="SemiBold" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                        <TextBlock Text="Show" FontWeight="SemiBold" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                     </ComboBox.Header>
                 </ComboBox>
 
                 <!-- Sort Combo -->
-                <ComboBox Grid.Column="3"
-                          Width="180"
+                <ComboBox Grid.Column="2" x:Name="SortBox"
+                          HorizontalAlignment="Stretch"
                           ItemsSource="{x:Bind ViewModel.SortOptions}"
                           SelectedItem="{x:Bind ViewModel.SelectedSort, Mode=TwoWay}">
                     <ComboBox.Header>
@@ -58,24 +70,30 @@
             </Grid>
 
             <!-- Status & Summary Bar -->
-            <Grid Grid.Row="1" Margin="0,12,0,0" ColumnDefinitions="*,Auto">
-                <TextBlock Grid.Column="0" 
-                           Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
-                           VerticalAlignment="Center"
-                           FontSize="13"
-                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-
-                <ProgressBar Grid.Column="1"
-                             IsIndeterminate="True"
-                             Width="120"
+            <Grid Grid.Row="1" Margin="0,12,0,0" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12">
+                <StackPanel Spacing="4">
+                    <TextBlock Text="{x:Bind ViewModel.ResultsSummary, Mode=OneWay}" FontSize="13" FontWeight="SemiBold" />
+                    <TextBlock Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
+                               TextWrapping="Wrap" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </StackPanel>
+                <Button Grid.Column="1" Content="Clear filters" Command="{x:Bind ViewModel.ResetFiltersCommand}"
+                        Visibility="{x:Bind ViewModel.HasActiveFilters, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                <Button Grid.Column="2" Content="Reload" Command="{x:Bind ViewModel.LoadGamesCommand}" />
+                <!-- Loading indicator -->
+                <ProgressBar Grid.Column="0"
+                             HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="0,4,0,0"
+                             IsIndeterminate="True" Width="120"
                              Visibility="{x:Bind ViewModel.IsLoading, Mode=OneWay, Converter={StaticResource BoolToVisibility}}"/>
             </Grid>
         </Grid>
+        </ContentControl>
 
         <!-- Games Grid -->
-        <ScrollViewer Grid.Row="1" Padding="20,0,20,24">
-            <GridView ItemsSource="{x:Bind ViewModel.FilteredGames, Mode=OneWay}"
+            <GridView Grid.Row="1" Padding="20,0,20,24"
+                      x:Name="GamesGrid"
+                      ItemsSource="{x:Bind ViewModel.FilteredGames, Mode=OneWay}"
                       SelectionMode="None"
+                      IsEnabled="{x:Bind ViewModel.IsDetailsOpen, Mode=OneWay, Converter={StaticResource InverseBool}}"
                       IsItemClickEnabled="True"
                       ItemClick="OnGameClicked">
                 <GridView.ItemsPanel>
@@ -88,7 +106,9 @@
                     <DataTemplate x:DataType="vm:GameCardViewModel">
                         <Grid Width="170" Height="255" Margin="8" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
                             <!-- Poster Art -->
-                            <Image Source="{x:Bind CoverUrl, Mode=OneWay}" 
+                            <Image Source="{x:Bind CoverUri, Mode=OneWay, Converter={StaticResource ArtworkImageConverter}}"
+                                   Tag="{x:Bind}"
+                                   ImageFailed="OnCoverImageFailed"
                                    Stretch="UniformToFill"
                                    HorizontalAlignment="Center"
                                    VerticalAlignment="Center"
@@ -126,10 +146,12 @@
                                         CornerRadius="4"
                                         Background="#80000000"
                                         BorderThickness="0"
-                                        Command="{x:Bind ToggleFavoriteCommand}">
+                                        Command="{x:Bind ToggleFavoriteCommand}"
+                                        ToolTipService.ToolTip="{x:Bind FavoriteActionLabel, Mode=OneWay}"
+                                        AutomationProperties.Name="{x:Bind FavoriteActionLabel, Mode=OneWay}">
                                     <FontIcon Glyph="&#xE734;" 
                                               FontSize="12" 
-                                              Foreground="{x:Bind IsFavorite, Mode=OneWay, Converter={StaticResource PlaytimeConverter}}"/>
+                                              Foreground="{x:Bind IsFavorite, Mode=OneWay, Converter={StaticResource FavoriteBrushConverter}}"/>
                                 </Button>
 
                                 <!-- Installed Indicator Pill -->
@@ -159,7 +181,7 @@
 
                                 <Grid Grid.Row="1" Margin="0,3,0,0" ColumnDefinitions="*,Auto">
                                     <TextBlock Grid.Column="0"
-                                               Text="{x:Bind PrimaryStoreName}" 
+                                               Text="{x:Bind PrimaryStoreName, Mode=OneWay}"
                                                FontSize="11" 
                                                Foreground="#CCCCCC"
                                                TextTrimming="CharacterEllipsis"/>
@@ -174,57 +196,99 @@
                     </DataTemplate>
                 </GridView.ItemTemplate>
             </GridView>
-        </ScrollViewer>
 
-        <!-- Details Dialog / Flyout Overlay -->
-        <ContentDialog x:Name="GameDetailsModal"
-                       Grid.RowSpan="2"
-                       Title="Game Details"
-                       CloseButtonText="Close"
-                       DefaultButton="Primary"
-                       PrimaryButtonText="Play"
-                       PrimaryButtonClick="OnPlayGameClicked">
-            <StackPanel Width="440" Spacing="16">
-                <!-- Cover Banner -->
-                <Border Height="180" CornerRadius="8" Background="{ThemeResource LayerFillColorDefaultBrush}">
-                    <Image Source="{x:Bind ViewModel.SelectedGame.CoverUrl, Mode=OneWay}" Stretch="UniformToFill"/>
-                </Border>
+        <StackPanel Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center"
+                    x:Name="EmptyPanel"
+                    MaxWidth="380" Margin="24" Spacing="12"
+                    Visibility="{x:Bind ViewModel.ShowEmptyState, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+            <FontIcon Glyph="&#xE7FC;" FontSize="36" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <TextBlock Text="{x:Bind ViewModel.EmptyTitle, Mode=OneWay}" FontSize="22" FontWeight="SemiBold"
+                       TextAlignment="Center" TextWrapping="Wrap" />
+            <TextBlock Text="{x:Bind ViewModel.EmptyDescription, Mode=OneWay}" TextAlignment="Center" TextWrapping="Wrap"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <Button Content="Clear filters" HorizontalAlignment="Center" Command="{x:Bind ViewModel.ResetFiltersCommand}"
+                    Visibility="{x:Bind ViewModel.HasActiveFilters, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+        </StackPanel>
 
-                <!-- Title & Status -->
-                <TextBlock Text="{x:Bind ViewModel.SelectedGame.Title, Mode=OneWay}" 
-                           FontSize="20" 
-                           FontWeight="Bold"/>
+        <!-- Details In-Page Modal Overlay -->
+        <Grid Grid.RowSpan="2"
+              x:Name="DetailsOverlay"
+              Visibility="{x:Bind ViewModel.IsDetailsOpen, Mode=OneWay, Converter={StaticResource BoolToVisibility}}"
+              Background="#B3000000"
+              Padding="24">
+            <Button HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="Transparent"
+                    BorderThickness="0" Command="{x:Bind ViewModel.CloseDetailsCommand}"
+                    AutomationProperties.Name="Close game details" />
+            <Border x:Name="DetailsCard" HorizontalAlignment="Stretch"
+                    VerticalAlignment="Center"
+                    MaxWidth="460"
+                    CornerRadius="12"
+                    Background="{ThemeResource LayerFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    Padding="24">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Spacing="16">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Text="Game Details" FontSize="18" FontWeight="Bold" VerticalAlignment="Center"/>
+                        <Button Grid.Column="1" x:Name="DetailsCloseButton" Content="✕" Command="{x:Bind ViewModel.CloseDetailsCommand}" Padding="8,4"
+                                AutomationProperties.Name="Close game details" ToolTipService.ToolTip="Close (Esc)"/>
+                    </Grid>
 
-                <Grid ColumnDefinitions="*,*">
-                    <StackPanel Grid.Column="0">
-                        <TextBlock Text="Total Playtime" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                        <TextBlock Text="{x:Bind ViewModel.SelectedGame.PlaytimeMinutes, Mode=OneWay, Converter={StaticResource PlaytimeConverter}}"
-                                   FontSize="15" FontWeight="SemiBold"/>
-                    </StackPanel>
+                    <TextBlock Text="{x:Bind ViewModel.SelectedGame.Title, Mode=OneWay}"
+                               FontSize="20"
+                               TextWrapping="Wrap"
+                               FontWeight="Bold"/>
 
-                    <StackPanel Grid.Column="1">
-                        <TextBlock Text="Preferred Store" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                        <TextBlock Text="{x:Bind ViewModel.SelectedGame.PrimaryStoreName, Mode=OneWay}"
-                                   FontSize="15" FontWeight="SemiBold"/>
-                    </StackPanel>
-                </Grid>
+                    <TextBlock Text="{x:Bind ViewModel.SelectedGame.InstallationStatus, Mode=OneWay}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
 
-                <!-- Store Sources Badges -->
-                <TextBlock Text="Available On Stores:" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                <ItemsControl ItemsSource="{x:Bind ViewModel.SelectedGame.Sources, Mode=OneWay}">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <Border Margin="0,2,0,2" Padding="8,6" CornerRadius="4" Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}">
-                                <Grid ColumnDefinitions="*,Auto,Auto">
-                                    <TextBlock Grid.Column="0" Text="{Binding Store}" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                                    <TextBlock Grid.Column="1" Text="Installed" Margin="0,0,8,0" Visibility="{Binding IsInstalled, Converter={StaticResource BoolToVisibility}}" Foreground="#107C10" VerticalAlignment="Center"/>
-                                    <Button Grid.Column="2" Content="Launch" Click="OnLaunchSpecificSourceClicked" Tag="{Binding}"/>
-                                </Grid>
-                            </Border>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </StackPanel>
-        </ContentDialog>
+                    <Grid ColumnDefinitions="*,*">
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Total Playtime" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                            <TextBlock Text="{x:Bind ViewModel.SelectedGame.PlaytimeMinutes, Mode=OneWay, Converter={StaticResource PlaytimeConverter}}"
+                                       FontSize="15" FontWeight="SemiBold"/>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="1">
+                            <TextBlock Text="Preferred Store" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                            <TextBlock Text="{x:Bind ViewModel.SelectedGame.PrimaryStoreName, Mode=OneWay}"
+                                       FontSize="15" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <ComboBox x:Name="LaunchPreferenceBox" Header="Launch preference" HorizontalAlignment="Stretch"
+                              ItemsSource="{x:Bind ViewModel.SelectedGame.StorePreferences, Mode=OneWay}"
+                              SelectedItem="{x:Bind ViewModel.SelectedGame.PendingStorePreference, Mode=OneWay}"
+                              DisplayMemberPath="Label" IsEnabled="{x:Bind ViewModel.SelectedGame.CanEdit, Mode=OneWay}"
+                              SelectionChanged="OnPreferenceSelectionChanged" />
+                    <Button Grid.Column="1" Content="Save" VerticalAlignment="Bottom"
+                            Command="{x:Bind ViewModel.SelectedGame.SavePreferredStoreCommand, Mode=OneWay}" />
+                    </Grid>
+
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                        <Button Content="{x:Bind ViewModel.SelectedGame.FavoriteActionLabel, Mode=OneWay}"
+                                Command="{x:Bind ViewModel.SelectedGame.ToggleFavoriteCommand, Mode=OneWay}" />
+                        <Button Grid.Column="1" Content="{x:Bind ViewModel.SelectedGame.HideActionLabel, Mode=OneWay}"
+                                Command="{x:Bind ViewModel.SelectedGame.ToggleHiddenCommand, Mode=OneWay}" />
+                    </Grid>
+
+                    <TextBlock Text="{x:Bind ViewModel.SelectedGame.ActionMessage, Mode=OneWay}" TextWrapping="Wrap"
+                               AutomationProperties.LiveSetting="Polite"
+                               Visibility="{x:Bind ViewModel.SelectedGame.HasActionMessage, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+
+                    <Button Style="{ThemeResource AccentButtonStyle}"
+                            HorizontalAlignment="Stretch"
+                            Command="{x:Bind ViewModel.SelectedGame.LaunchCommand, Mode=OneWay}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon Glyph="&#xE768;" FontSize="14"/>
+                            <TextBlock Text="{x:Bind ViewModel.SelectedGame.LaunchActionLabel, Mode=OneWay}"/>
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+                </ScrollViewer>
+            </Border>
+        </Grid>
     </Grid>
 </Page>

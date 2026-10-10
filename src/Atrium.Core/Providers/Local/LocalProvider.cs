@@ -25,34 +25,42 @@ public sealed class LocalProvider : ILibraryProvider
     public async Task<IReadOnlyList<ProviderGame>> GetGamesAsync(CancellationToken ct = default)
     {
         var results = new List<ProviderGame>();
+        var seenExecutables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        ct.ThrowIfCancellationRequested();
 
         foreach (var path in _watchPaths)
         {
             ct.ThrowIfCancellationRequested();
             if (File.Exists(path) && path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
             {
-                var game = CreateFromExe(path);
+                var game = seenExecutables.Add(Path.GetFullPath(path)) ? CreateFromExe(path) : null;
                 if (game != null) results.Add(game);
             }
             else if (Directory.Exists(path))
             {
-                ScanDirectory(path, results, ct);
+                ScanDirectory(path, results, seenExecutables, ct);
             }
         }
 
         return await Task.FromResult(results);
     }
 
-    private static void ScanDirectory(string rootDir, List<ProviderGame> results, CancellationToken ct)
+    private static void ScanDirectory(string rootDir, List<ProviderGame> results, HashSet<string> seenExecutables, CancellationToken ct)
     {
         try
         {
-            var exes = Directory.GetFiles(rootDir, "*.exe", SearchOption.AllDirectories);
+            var exes = Directory.EnumerateFiles(rootDir, "*.exe", new EnumerationOptions
+            {
+                RecurseSubdirectories = true,
+                IgnoreInaccessible = true,
+                AttributesToSkip = FileAttributes.ReparsePoint,
+                MatchCasing = MatchCasing.CaseInsensitive
+            });
             foreach (var exe in exes)
             {
                 ct.ThrowIfCancellationRequested();
                 var filename = Path.GetFileName(exe);
-                if (IsExcluded(filename)) continue;
+                if (IsExcluded(filename) || !seenExecutables.Add(Path.GetFullPath(exe))) continue;
 
                 var game = CreateFromExe(exe);
                 if (game != null)
@@ -61,7 +69,9 @@ public sealed class LocalProvider : ILibraryProvider
                 }
             }
         }
-        catch { }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
     }
 
     private static ProviderGame? CreateFromExe(string exePath)

@@ -28,11 +28,13 @@ public sealed class LibraryDatabase : IDisposable
         {
             DataSource = _databasePath,
             Mode = SqliteOpenMode.ReadWriteCreate,
-            Cache = SqliteCacheMode.Shared
+            ForeignKeys = true
         }.ToString();
     }
 
     public string DatabasePath => _databasePath;
+
+    internal SqliteConnection CreateConnection() => new(_connectionString);
 
     public async Task InitializeAsync()
     {
@@ -118,16 +120,40 @@ public sealed class LibraryDatabase : IDisposable
         await conn.ExecuteAsync(sql);
     }
 
-    public async Task UpsertGamesAsync(IEnumerable<Game> games)
+    public async Task UpsertGamesAsync(IEnumerable<Game> games, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync();
+        await conn.OpenAsync(cancellationToken);
         using var tx = conn.BeginTransaction();
 
         var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var existingIds = (await conn.QueryAsync<string>("SELECT Id FROM Games", transaction: tx)).ToHashSet();
+        var sourceOwners = (await conn.QueryAsync<SourceIdentity>(
+            "SELECT GameId, Store, StoreId FROM Sources", transaction: tx))
+            .ToDictionary(s => (s.Store, s.StoreId), s => s.GameId);
 
         foreach (var g in games)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            // Provider scans create new objects. Store identities, rather than those
+            // temporary GUIDs or titles, determine which persisted game to update.
+            var matchedIds = g.Sources
+                .Select(s => sourceOwners.GetValueOrDefault(((int)s.Store, s.StoreId)))
+                .OfType<string>().Distinct().OrderBy(id => id, StringComparer.Ordinal).ToList();
+            var gameId = existingIds.Contains(g.Id.ToString())
+                ? g.Id.ToString()
+                : matchedIds.FirstOrDefault() ?? g.Id.ToString();
+
+            foreach (var oldId in matchedIds.Where(id => id != gameId))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await MergeGameRecordsAsync(conn, tx, oldId, gameId);
+                foreach (var key in sourceOwners.Where(pair => pair.Value == oldId).Select(pair => pair.Key).ToList())
+                    sourceOwners[key] = gameId;
+                existingIds.Remove(oldId);
+            }
+
             var metaJson = g.Metadata != null ? JsonSerializer.Serialize(g.Metadata) : null;
             var artJson = JsonSerializer.Serialize(g.Artwork);
 
@@ -142,7 +168,7 @@ public sealed class LibraryDatabase : IDisposable
                     UpdatedAt = excluded.UpdatedAt;",
                 new
                 {
-                    Id = g.Id.ToString(),
+                    Id = gameId,
                     g.Title,
                     g.SortTitle,
                     MetadataJson = metaJson,
@@ -153,6 +179,7 @@ public sealed class LibraryDatabase : IDisposable
             // Upsert sources
             foreach (var s in g.Sources)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 await conn.ExecuteAsync(@"
                     INSERT INTO Sources (GameId, Store, StoreId, IsInstalled, InstallPath, ExecutablePath, LaunchUri, PlaytimeMinutes, LastPlayed)
                     VALUES (@GameId, @Store, @StoreId, @IsInstalled, @InstallPath, @ExecutablePath, @LaunchUri, @PlaytimeMinutes, @LastPlayed)
@@ -166,7 +193,7 @@ public sealed class LibraryDatabase : IDisposable
                         LastPlayed = excluded.LastPlayed;",
                     new
                     {
-                        GameId = g.Id.ToString(),
+                        GameId = gameId,
                         Store = (int)s.Store,
                         s.StoreId,
                         IsInstalled = s.IsInstalled ? 1 : 0,
@@ -176,6 +203,7 @@ public sealed class LibraryDatabase : IDisposable
                         s.PlaytimeMinutes,
                         LastPlayed = s.LastPlayed?.ToUnixTimeSeconds()
                     }, tx);
+                sourceOwners[((int)s.Store, s.StoreId)] = gameId;
             }
 
             // Ensure UserData exists
@@ -183,11 +211,10 @@ public sealed class LibraryDatabase : IDisposable
             await conn.ExecuteAsync(@"
                 INSERT INTO UserData (GameId, Favorite, Hidden, PreferredStoreOverride, TrackedMinutes, ExeOverride, CoverOverride, CollectionsJson)
                 VALUES (@GameId, @Favorite, @Hidden, @PreferredStoreOverride, @TrackedMinutes, @ExeOverride, @CoverOverride, @CollectionsJson)
-                ON CONFLICT(GameId) DO UPDATE SET
-                    TrackedMinutes = TrackedMinutes + excluded.TrackedMinutes;",
+                ON CONFLICT(GameId) DO NOTHING;",
                 new
                 {
-                    GameId = g.Id.ToString(),
+                    GameId = gameId,
                     Favorite = g.User.Favorite ? 1 : 0,
                     Hidden = g.User.Hidden ? 1 : 0,
                     PreferredStoreOverride = (int?)g.User.PreferredStoreOverride,
@@ -196,9 +223,70 @@ public sealed class LibraryDatabase : IDisposable
                     g.User.CoverOverride,
                     CollectionsJson = collectionsJson
                 }, tx);
+            existingIds.Add(gameId);
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         tx.Commit();
+    }
+
+    private static async Task MergeGameRecordsAsync(SqliteConnection conn, SqliteTransaction tx, string oldId, string gameId)
+    {
+        await conn.ExecuteAsync("INSERT OR IGNORE INTO UserData (GameId) VALUES (@GameId)", new { GameId = gameId }, tx);
+        var oldUser = await conn.QuerySingleOrDefaultAsync<UserDataRow>(
+            "SELECT * FROM UserData WHERE GameId = @Id", new { Id = oldId }, tx);
+        var targetUser = await conn.QuerySingleAsync<UserDataRow>(
+            "SELECT * FROM UserData WHERE GameId = @Id", new { Id = gameId }, tx);
+
+        if (oldUser != null)
+        {
+            var collections = ReadCollections(targetUser.CollectionsJson)
+                .Concat(ReadCollections(oldUser.CollectionsJson)).Distinct(StringComparer.OrdinalIgnoreCase);
+            await conn.ExecuteAsync(@"
+                UPDATE UserData SET
+                    Favorite = MAX(Favorite, @Favorite),
+                    Hidden = MAX(Hidden, @Hidden),
+                    PreferredStoreOverride = COALESCE(PreferredStoreOverride, @PreferredStoreOverride),
+                    TrackedMinutes = TrackedMinutes + @TrackedMinutes,
+                    ExeOverride = COALESCE(ExeOverride, @ExeOverride),
+                    CoverOverride = COALESCE(CoverOverride, @CoverOverride),
+                    CollectionsJson = @CollectionsJson
+                WHERE GameId = @GameId;",
+                new
+                {
+                    GameId = gameId,
+                    oldUser.Favorite, oldUser.Hidden, oldUser.PreferredStoreOverride,
+                    oldUser.TrackedMinutes, oldUser.ExeOverride, oldUser.CoverOverride,
+                    CollectionsJson = JsonSerializer.Serialize(collections)
+                }, tx);
+        }
+
+        await conn.ExecuteAsync(@"
+            UPDATE Sources SET GameId = @GameId WHERE GameId = @OldId;
+            UPDATE PlaySessions SET GameId = @GameId WHERE GameId = @OldId;
+            DELETE FROM Games WHERE Id = @OldId;",
+            new { GameId = gameId, OldId = oldId }, tx);
+    }
+
+    private static List<string> ReadCollections(string? json) =>
+        json == null ? [] : JsonSerializer.Deserialize<List<string>>(json) ?? [];
+
+    private sealed class SourceIdentity
+    {
+        public string GameId { get; set; } = string.Empty;
+        public int Store { get; set; }
+        public string StoreId { get; set; } = string.Empty;
+    }
+
+    private sealed class UserDataRow
+    {
+        public int Favorite { get; set; }
+        public int Hidden { get; set; }
+        public int? PreferredStoreOverride { get; set; }
+        public int TrackedMinutes { get; set; }
+        public string? ExeOverride { get; set; }
+        public string? CoverOverride { get; set; }
+        public string? CollectionsJson { get; set; }
     }
 
     public async Task<IReadOnlyList<Game>> GetAllGamesAsync()
@@ -271,25 +359,28 @@ public sealed class LibraryDatabase : IDisposable
     public async Task SetFavoriteAsync(Guid gameId, bool favorite)
     {
         using var conn = new SqliteConnection(_connectionString);
-        await conn.ExecuteAsync(@"
+        var updated = await conn.ExecuteAsync(@"
             UPDATE UserData SET Favorite = @Favorite WHERE GameId = @GameId",
             new { GameId = gameId.ToString(), Favorite = favorite ? 1 : 0 });
+        if (updated != 1) throw new InvalidOperationException("This game is no longer in the saved library. Reload the library and try again.");
     }
 
     public async Task SetHiddenAsync(Guid gameId, bool hidden)
     {
         using var conn = new SqliteConnection(_connectionString);
-        await conn.ExecuteAsync(@"
+        var updated = await conn.ExecuteAsync(@"
             UPDATE UserData SET Hidden = @Hidden WHERE GameId = @GameId",
             new { GameId = gameId.ToString(), Hidden = hidden ? 1 : 0 });
+        if (updated != 1) throw new InvalidOperationException("This game is no longer in the saved library. Reload the library and try again.");
     }
 
     public async Task SetPreferredStoreAsync(Guid gameId, StoreKind? store)
     {
         using var conn = new SqliteConnection(_connectionString);
-        await conn.ExecuteAsync(@"
+        var updated = await conn.ExecuteAsync(@"
             UPDATE UserData SET PreferredStoreOverride = @Store WHERE GameId = @GameId",
             new { GameId = gameId.ToString(), Store = (int?)store });
+        if (updated != 1) throw new InvalidOperationException("This game is no longer in the saved library. Reload the library and try again.");
     }
 
     public async Task<string?> GetSettingAsync(string key, string? defaultValue = null)
