@@ -11,11 +11,11 @@ public sealed record ArtworkSet
     public string? LogoUrl { get; init; }
     public string? LocalLogoPath { get; init; }
 
-    public string? EffectiveCover => !string.IsNullOrEmpty(LocalCoverPath) && System.IO.File.Exists(LocalCoverPath)
+    public string? EffectiveCover => !string.IsNullOrEmpty(LocalCoverPath) && global::System.IO.File.Exists(LocalCoverPath)
         ? LocalCoverPath
         : CoverUrl;
 
-    public string? EffectiveBackground => !string.IsNullOrEmpty(LocalBackgroundPath) && System.IO.File.Exists(LocalBackgroundPath)
+    public string? EffectiveBackground => !string.IsNullOrEmpty(LocalBackgroundPath) && global::System.IO.File.Exists(LocalBackgroundPath)
         ? LocalBackgroundPath
         : BackgroundUrl;
 }
