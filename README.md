@@ -25,7 +25,7 @@
 ### Build & Test
 ```powershell
 # Clone repository
-git clone https://github.com/AlexGuadagno/Atrium.git
+git clone https://github.com/oalqx/Atrium.git
 cd Atrium
 
 # Build solution
