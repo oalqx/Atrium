@@ -19,10 +19,11 @@ public class HardwareServiceTests
         info.PrimaryDisplay.Height.Should().BeGreaterThan(0);
         info.PrimaryDisplay.RefreshRateHz.Should().BeGreaterThan(0);
 
-        // On this specific machine, verify multi-GPU detection (RTX 4050 + AMD Radeon)
-        info.HasMultiGpu.Should().BeTrue();
-        info.HighPerformanceGpu.Should().NotBeNull();
-        info.HighPerformanceGpu!.Vendor.Should().Be(GpuVendor.Nvidia);
-        info.HighPerformanceGpu.Name.Should().Contain("RTX 4050");
+        // If running on a multi-GPU system (such as user's laptop with NVIDIA RTX + Radeon iGPU)
+        if (info.HasMultiGpu)
+        {
+            info.HighPerformanceGpu.Should().NotBeNull();
+            info.PowerSavingGpu.Should().NotBeNull();
+        }
     }
 }
