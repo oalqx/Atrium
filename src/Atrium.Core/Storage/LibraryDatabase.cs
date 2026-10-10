@@ -108,6 +108,11 @@ public sealed class LibraryDatabase : IDisposable
                 EndedAt INTEGER,
                 DurationMinutes INTEGER
             );
+
+            CREATE TABLE IF NOT EXISTS AppSettings (
+                Key TEXT PRIMARY KEY,
+                Value TEXT NOT NULL
+            );
         ";
 
         await conn.ExecuteAsync(sql);
@@ -285,6 +290,25 @@ public sealed class LibraryDatabase : IDisposable
         await conn.ExecuteAsync(@"
             UPDATE UserData SET PreferredStoreOverride = @Store WHERE GameId = @GameId",
             new { GameId = gameId.ToString(), Store = (int?)store });
+    }
+
+    public async Task<string?> GetSettingAsync(string key, string? defaultValue = null)
+    {
+        using var conn = new SqliteConnection(_connectionString);
+        await conn.OpenAsync();
+        var val = await conn.ExecuteScalarAsync<string>(
+            "SELECT Value FROM AppSettings WHERE Key = @Key", new { Key = key });
+        return val ?? defaultValue;
+    }
+
+    public async Task SetSettingAsync(string key, string value)
+    {
+        using var conn = new SqliteConnection(_connectionString);
+        await conn.OpenAsync();
+        await conn.ExecuteAsync(@"
+            INSERT INTO AppSettings (Key, Value) VALUES (@Key, @Value)
+            ON CONFLICT(Key) DO UPDATE SET Value = excluded.Value",
+            new { Key = key, Value = value });
     }
 
     public void Dispose()

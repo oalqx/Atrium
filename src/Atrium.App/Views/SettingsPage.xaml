@@ -1,0 +1,116 @@
+<Page
+    x:Class="Atrium.App.Views.SettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:vm="using:Atrium.App.ViewModels"
+    xmlns:converters="using:Atrium.App.Converters"
+    mc:Ignorable="d">
+
+    <Page.Resources>
+        <converters:BoolToVisibilityConverter x:Key="BoolToVisibility" />
+    </Page.Resources>
+
+    <ScrollViewer Padding="32,24,32,32">
+        <StackPanel MaxWidth="800" HorizontalAlignment="Left" Spacing="24">
+            <!-- Header -->
+            <StackPanel Spacing="4">
+                <TextBlock Text="Settings" FontSize="28" FontWeight="Bold"/>
+                <TextBlock Text="Customize Atrium appearance, store preferences, and updates."
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+            </StackPanel>
+
+            <!-- Appearance Section -->
+            <TextBlock Text="Appearance" FontSize="18" FontWeight="SemiBold"/>
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" 
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" 
+                    BorderThickness="1" 
+                    CornerRadius="8" 
+                    Padding="16">
+                <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                        <TextBlock Text="App Theme" FontWeight="SemiBold" FontSize="14"/>
+                        <TextBlock Text="Select Light, Dark, or automatically match Windows theme." FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                    </StackPanel>
+
+                    <ComboBox Grid.Column="1" 
+                              Width="180"
+                              ItemsSource="{x:Bind ViewModel.ThemeOptions}"
+                              SelectedItem="{x:Bind ViewModel.ThemeSelection, Mode=TwoWay}"/>
+                </Grid>
+            </Border>
+
+            <!-- Library Preferences -->
+            <TextBlock Text="Library &amp; Launching" FontSize="18" FontWeight="SemiBold"/>
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" 
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" 
+                    BorderThickness="1" 
+                    CornerRadius="8" 
+                    Padding="16">
+                <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                        <TextBlock Text="Default Preferred Storefront" FontWeight="SemiBold" FontSize="14"/>
+                        <TextBlock Text="When a game is owned on multiple platforms, launch via this store by default." FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                    </StackPanel>
+
+                    <ComboBox Grid.Column="1" 
+                              Width="180"
+                              ItemsSource="{x:Bind ViewModel.StoreOptions}"
+                              SelectedItem="{x:Bind ViewModel.PreferredDefaultStore, Mode=TwoWay}"/>
+                </Grid>
+            </Border>
+
+            <!-- Updates Section -->
+            <TextBlock Text="Updates" FontSize="18" FontWeight="SemiBold"/>
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" 
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" 
+                    BorderThickness="1" 
+                    CornerRadius="8" 
+                    Padding="16">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                    <StackPanel Grid.Column="0" Spacing="4" VerticalAlignment="Center">
+                        <TextBlock Text="Software Updates" FontWeight="SemiBold" FontSize="14"/>
+                        <TextBlock Text="{x:Bind ViewModel.UpdateStatusText, Mode=OneWay}" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                    </StackPanel>
+
+                    <Button Grid.Column="1" 
+                            Command="{x:Bind ViewModel.CheckForUpdatesCommand}"
+                            VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <ProgressRing IsActive="{x:Bind ViewModel.IsCheckingForUpdates, Mode=OneWay}"
+                                          Visibility="{x:Bind ViewModel.IsCheckingForUpdates, Mode=OneWay, Converter={StaticResource BoolToVisibility}}"
+                                          Width="16" Height="16"/>
+                            <TextBlock Text="Check for Updates"/>
+                        </StackPanel>
+                    </Button>
+                </Grid>
+            </Border>
+
+            <!-- About Section -->
+            <TextBlock Text="About Atrium" FontSize="18" FontWeight="SemiBold"/>
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" 
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" 
+                    BorderThickness="1" 
+                    CornerRadius="8" 
+                    Padding="16">
+                <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Grid.Column="0" Spacing="4">
+                        <TextBlock Text="Atrium Unified Gaming Library &amp; Graphics Optimizer" FontWeight="Bold" FontSize="15"/>
+                        <TextBlock Text="{x:Bind ViewModel.AppVersion}" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                        <TextBlock Text="Open-source under MIT License · Created by Alex Guadagno" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                    </StackPanel>
+
+                    <Button Grid.Column="1" 
+                            Command="{x:Bind ViewModel.OpenGitHubCommand}"
+                            VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon Glyph="&#xE774;" FontSize="14"/>
+                            <TextBlock Text="GitHub Repository"/>
+                        </StackPanel>
+                    </Button>
+                </Grid>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

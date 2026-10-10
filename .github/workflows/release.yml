@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g. 0.1.0)'
+        required: true
+        default: '0.1.0'
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 10.0.x
+
+    - name: Determine Version
+      id: get_version
+      shell: pwsh
+      run: |
+        $ver = if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+          "${{ github.event.inputs.version }}"
+        } else {
+          "${{ github.ref_name }}".TrimStart('v')
+        }
+        echo "VERSION=$ver" >> $env:GITHUB_OUTPUT
+
+    - name: Run Tests
+      run: dotnet test Atrium.slnx -c Release
+
+    - name: Publish Atrium.App
+      run: >
+        dotnet publish src/Atrium.App/Atrium.App.csproj 
+        -c Release 
+        -r win-x64 
+        --self-contained 
+        -p:Version=${{ steps.get_version.outputs.VERSION }} 
+        -o ./publish
+
+    - name: Install Velopack CLI (vpk)
+      run: dotnet tool install -g vpk
+
+    - name: Build Velopack Installer Package
+      run: >
+        vpk pack 
+        --packId Atrium 
+        --packVersion ${{ steps.get_version.outputs.VERSION }} 
+        --packDir ./publish 
+        --mainExe Atrium.App.exe 
+        --packAuthors "Alex Guadagno" 
+        --packTitle "Atrium" 
+        --outputDir ./releases
+
+    - name: Create GitHub Release & Upload Assets
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ github.ref_name || format('v{0}', steps.get_version.outputs.VERSION) }}
+        name: Atrium ${{ steps.get_version.outputs.VERSION }}
+        files: ./releases/*
+        draft: false
+        prerelease: false
+        generate_release_notes: true

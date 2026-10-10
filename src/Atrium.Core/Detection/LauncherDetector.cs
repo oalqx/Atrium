@@ -12,6 +12,7 @@ public sealed record LauncherPaths
     public bool HasSteam => !string.IsNullOrEmpty(SteamPath) && Directory.Exists(SteamPath);
     public bool HasEpic => !string.IsNullOrEmpty(EpicManifestsPath) && Directory.Exists(EpicManifestsPath);
     public bool HasGogGalaxy => !string.IsNullOrEmpty(GogGalaxyDatabasePath) && File.Exists(GogGalaxyDatabasePath);
+    public bool HasGogStandalone => true; // GogProvider inspects registry safely
     public bool HasXbox => XboxGamesFolders.Count > 0;
 }
 

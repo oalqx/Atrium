@@ -43,3 +43,5 @@ atrium.db-wal
 logs/
 cache/
 artwork_cache/
+artifacts/
+releases/

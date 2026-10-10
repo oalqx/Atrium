@@ -37,6 +37,25 @@ dotnet test Atrium.slnx -c Release
 
 ---
 
+## Project Architecture
+
+Atrium is engineered with a clean modular separation of concerns:
+
+- **`Atrium.Core`**: High-performance core library containing launcher detection, manifest parsers (Steam VDF/ACF, Epic JSON, GOG Galaxy SQLite, Xbox manifests), Disjoint-Set Union-Find library merger, DXGI/WMI hardware introspection, DirectX graphics preference manager, and SQLite persistence.
+- **`Atrium.App`**: Native WinUI 3 desktop application leveraging Windows App SDK 1.6, CommunityToolkit MVVM, dependency injection, Mica Alt backdrop, and Velopack auto-updates.
+- **`Atrium.Core.Tests`**: Comprehensive unit and end-to-end integration test suite running in xUnit and FluentAssertions.
+
+---
+
+## Intelligent Graphics Optimizer
+
+Atrium identifies discrete gaming GPUs (such as NVIDIA GeForce RTX) alongside integrated processors (such as AMD Radeon graphics). Using the Windows DirectX Graphics Preferences registry (`HKCU\Software\Microsoft\DirectX\UserGpuPreferences`), Atrium can enforce discrete GPU execution per game or across all installed games in one click.
+
+Every modification automatically backs up previous settings into `atrium.db`, enabling instant, guaranteed 100% rollback at any time.
+
+---
+
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
+

@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Atrium.Core/Atrium.Core.csproj" />
+    <Project Path="src/Atrium.App/Atrium.App.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Atrium.Core.Tests/Atrium.Core.Tests.csproj" />
