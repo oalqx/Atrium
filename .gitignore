@@ -1,0 +1,45 @@
+## Visual Studio / .NET
+[Bb]in/
+[Oo]bj/
+*.user
+*.userosscache
+*.sln.docstates
+.vs/
+.idea/
+.vscode/
+
+## Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+ARM64/
+bld/
+[Bb]in/
+[Oo]bj/
+_UpgradeReport_Files/
+*.mdf
+*.ldf
+*.ndf
+
+## Package restore
+*.nuget.props
+*.nuget.targets
+project.lock.json
+project.assets.json
+
+## WinUI / AppX / MSIX
+AppPackages/
+BundleArtifacts/
+Package.StoreAssociation.xml
+_pkginfo.txt
+*.pri
+*.xbf
+
+## Atrium runtime local data
+atrium.db
+atrium.db-shm
+atrium.db-wal
+logs/
+cache/
+artwork_cache/
