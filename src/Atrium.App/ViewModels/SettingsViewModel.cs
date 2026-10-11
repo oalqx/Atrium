@@ -9,7 +9,7 @@ using Velopack;
 
 namespace Atrium.App.ViewModels;
 
-public sealed partial class SettingsViewModel : ObservableObject
+public sealed partial class SettingsViewModel : ObservableObject, ILibraryPreferences
 {
     private readonly LibraryDatabase _database;
 

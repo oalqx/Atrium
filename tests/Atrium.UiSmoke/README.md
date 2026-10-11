@@ -1,4 +1,4 @@
-# Native Library smoke test
+# Native Library and launch-view smoke test
 
 On Windows, build and run the opt-in test host:
 
@@ -14,4 +14,6 @@ It also checks unmatched-search empty states, clearing filters, Hidden and Insta
 
 The host verifies dark/light caption colors, reserved caption-button space and native pointer regions for title-bar actions, and Sources progress/cancel/control bindings. `--controls-only` skips the complete game-card scroll when diagnosing those controls; its report identifies that reduced scope.
 
-The test does not sync games, save fixture cards, launch games, or change GPU preferences. Only builds with `UiSmokeTest=true` include the host; its output is separate from normal Release builds. If .NET is installed outside the default location, set `DOTNET_ROOT` to that runtime directory before launching.
+The host also checks the compact icon rail, artwork-derived launch colors, switching games without stale colors, and collection editor bindings. Collection saves use an isolated temporary database, which is removed after the check. It exports `launch-wide.png`, `launch-compact.png`, and `library-compact-sidebar.png` beside the executable for visual review. These XAML captures exclude native caption buttons and may not reproduce system Mica or composition effects.
+
+The test does not sync or change the user's saved library, launch games, or change GPU preferences. Only builds with `UiSmokeTest=true` include the host; its output is separate from normal Release builds. If .NET is installed outside the default location, set `DOTNET_ROOT` to that runtime directory before launching.

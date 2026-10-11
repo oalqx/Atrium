@@ -49,7 +49,10 @@
         <NavigationView Grid.Row="1"
                         x:Name="NavView"
                         IsBackButtonVisible="Collapsed"
-                        PaneDisplayMode="Auto"
+                        PaneDisplayMode="LeftCompact"
+                        OpenPaneLength="216"
+                        CompactPaneLength="52"
+                        IsPaneOpen="False"
                         IsSettingsVisible="False"
                         SelectionChanged="OnNavSelectionChanged">
             <NavigationView.MenuItems>

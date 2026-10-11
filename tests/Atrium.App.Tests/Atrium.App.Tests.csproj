@@ -14,5 +14,7 @@
     <Compile Include="../../src/Atrium.App/ViewModels/GameCardViewModel.cs" Link="ViewModels/GameCardViewModel.cs" />
     <Compile Include="../../src/Atrium.App/ViewModels/GpuOptimizerViewModel.cs" Link="ViewModels/GpuOptimizerViewModel.cs" />
     <Compile Include="../../src/Atrium.App/ViewModels/SourcesViewModel.cs" Link="ViewModels/SourcesViewModel.cs" />
+    <Compile Include="../../src/Atrium.App/ViewModels/LibraryViewModel.cs" Link="ViewModels/LibraryViewModel.cs" />
+    <Compile Include="../../src/Atrium.App/ViewModels/ILibraryPreferences.cs" Link="ViewModels/ILibraryPreferences.cs" />
   </ItemGroup>
 </Project>

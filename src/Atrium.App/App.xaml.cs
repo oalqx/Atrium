@@ -43,6 +43,7 @@ public partial class App : Application
         services.AddSingleton<SourcesViewModel>();
         services.AddSingleton<GpuOptimizerViewModel>();
         services.AddSingleton<SettingsViewModel>();
+        services.AddSingleton<ILibraryPreferences>(provider => provider.GetRequiredService<SettingsViewModel>());
     }
 
     public static T GetService<T>() where T : class

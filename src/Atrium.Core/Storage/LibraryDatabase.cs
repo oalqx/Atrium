@@ -383,6 +383,33 @@ public sealed class LibraryDatabase : IDisposable
         if (updated != 1) throw new InvalidOperationException("This game is no longer in the saved library. Reload the library and try again.");
     }
 
+    public async Task<IReadOnlyList<string>> ChangeCollectionAsync(Guid gameId, string name, bool add)
+    {
+        name = name.Trim();
+        if (name.Length is 0 or > 80 || name.Any(char.IsControl))
+            throw new ArgumentException("Use a collection name of 1–80 characters without line breaks.", nameof(name));
+
+        using var conn = new SqliteConnection(_connectionString);
+        await conn.OpenAsync();
+        using var tx = conn.BeginTransaction();
+        var user = await conn.QuerySingleOrDefaultAsync<UserDataRow>(
+            "SELECT CollectionsJson FROM UserData WHERE GameId = @GameId",
+            new { GameId = gameId.ToString() }, tx);
+        if (user == null)
+            throw new InvalidOperationException("This game is no longer in the saved library. Reload the library and try again.");
+
+        // Read and edit inside one transaction so two open cards cannot overwrite
+        // each other's additions, or other user preferences saved in the meantime.
+        var collections = ReadCollections(user.CollectionsJson).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (add && !collections.Contains(name, StringComparer.OrdinalIgnoreCase)) collections.Add(name);
+        if (!add) collections.RemoveAll(value => string.Equals(value, name, StringComparison.OrdinalIgnoreCase));
+        collections.Sort(StringComparer.OrdinalIgnoreCase);
+        await conn.ExecuteAsync("UPDATE UserData SET CollectionsJson = @Json WHERE GameId = @GameId",
+            new { GameId = gameId.ToString(), Json = JsonSerializer.Serialize(collections) }, tx);
+        tx.Commit();
+        return collections;
+    }
+
     public async Task<string?> GetSettingAsync(string key, string? defaultValue = null)
     {
         using var conn = new SqliteConnection(_connectionString);

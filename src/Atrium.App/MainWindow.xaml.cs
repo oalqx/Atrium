@@ -106,8 +106,10 @@ public sealed partial class MainWindow : Window
     {
         if (!ExtendsContentIntoTitleBar || AppTitleBar.XamlRoot == null) return;
         var scale = AppTitleBar.XamlRoot.RasterizationScale;
-        var leftInset = AppWindow.TitleBar.LeftInset / scale;
-        var rightInset = AppWindow.TitleBar.RightInset / scale;
+        // XAML can temporarily report a zero scale during a resize or offscreen render.
+        if (scale <= 0 || !double.IsFinite(scale)) return;
+        var leftInset = Math.Max(0, AppWindow.TitleBar.LeftInset) / scale;
+        var rightInset = Math.Max(0, AppWindow.TitleBar.RightInset) / scale;
         if (Math.Abs(LeftCaptionInset.Width.Value - leftInset) > 0.01) LeftCaptionInset.Width = new GridLength(leftInset);
         if (Math.Abs(RightCaptionInset.Width.Value - rightInset) > 0.01) RightCaptionInset.Width = new GridLength(rightInset);
         var position = TitleBarActions.TransformToVisual(Content as UIElement)

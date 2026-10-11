@@ -15,6 +15,9 @@
 - **Library Controls:** Search, favorites, installed/store/hidden filters, and recent-play sorting. Game details let you save a launcher preference for each game and hide or restore entries. Failed launches and saves show actionable feedback.
 - **Sync Progress and Cancellation:** See which launcher is being scanned, cancel an in-progress sync, and inspect individual provider errors. Cancellation before the save commits rolls back the batch and keeps the previous library.
 - **Theme-aware Title Bar:** The custom header and Windows caption buttons follow the app's dark/light theme, with draggable space and working Sync/Cancel controls.
+- **Artwork-led Launch View:** Open a game to see its cover poster and artwork backdrop. The launch button and surface tint adapt to the cover's colors, with readable button text and a fallback for missing or offline artwork. Switch launchers directly or save your preferred copy.
+- **Collections:** Create your own groups from a game's launch view and filter the Library by collection alongside search, storefront, favorites, or installation status. Collection edits stay local and survive rescans.
+- **Compact Navigation:** A narrow icon rail leaves more space for games; expand it when you want labels.
 
 ---
 
@@ -41,6 +44,8 @@ dotnet test Atrium.slnx -c Release
 The [native Library smoke test](tests/Atrium.UiSmoke/README.md) also checks WinUI image bindings and navigation against the current local library.
 
 In Library, click a game to open its details. Choose a launch preference and select **Save**; **Follow library preference** restores the global setting. Hidden games remain saved and can be restored from the **Hidden** filter. **Ctrl+F** focuses search, **Esc** closes details, and **Clear filters** restores the full visible library.
+
+In the launch view, enter a collection name and select **Add** (or press **Enter**). Select **Remove** beside a group to remove this game from it. Collection names ignore letter case and accept up to 80 characters. The Library's **Collection** filter combines with the other filters; **Clear filters** also resets it. **Library** or **Esc** returns to your previous Library position.
 
 In Launchers & Sources, **Sync Entire Library** reports each scan and save stage. **Cancel** requests cancellation and waits for the current operation to finish. Folder paths are validated and normalized before being saved; overlapping folders do not import the same executable twice. Removing a configured folder keeps games already saved in the library.
 

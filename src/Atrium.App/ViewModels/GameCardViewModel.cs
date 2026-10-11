@@ -7,6 +7,7 @@ using CommunityToolkit.Mvvm.Input;
 namespace Atrium.App.ViewModels;
 
 public sealed record StorePreferenceOption(StoreKind? Store, string Label);
+public sealed record LaunchSourceOption(GameSource Source, string Label, string Status);
 
 public sealed partial class GameCardViewModel : ObservableObject
 {
@@ -31,7 +32,13 @@ public sealed partial class GameCardViewModel : ObservableObject
     [NotifyCanExecuteChangedFor(nameof(ToggleFavoriteCommand))]
     [NotifyCanExecuteChangedFor(nameof(ToggleHiddenCommand))]
     [NotifyCanExecuteChangedFor(nameof(SavePreferredStoreCommand))]
+    [NotifyCanExecuteChangedFor(nameof(AddCollectionCommand))]
+    [NotifyCanExecuteChangedFor(nameof(RemoveCollectionCommand))]
     private bool _isSaving;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(AddCollectionCommand))]
+    private string _collectionDraft = string.Empty;
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(SavePreferredStoreCommand))]
@@ -50,18 +57,25 @@ public sealed partial class GameCardViewModel : ObservableObject
     public string? CoverUrl => Game.Artwork.EffectiveCover;
     public Uri? CoverUri => ArtworkUriResolver.Resolve(CoverUrl);
     public string? BackgroundUrl => Game.Artwork.EffectiveBackground;
+    public Uri? BackgroundUri => ArtworkUriResolver.Resolve(BackgroundUrl) ?? CoverUri;
+    public string LastPlayedText => Game.MostRecentPlayed?.ToLocalTime().ToString("MMM d, yyyy") ?? "No activity recorded";
+    public IReadOnlyList<LaunchSourceOption> LaunchSources => Game.Sources.Select(source =>
+        new LaunchSourceOption(source, StoreName(source.Store), source.IsInstalled ? "Installed" : "In your library")).ToArray();
     public bool HasCover => CoverUri != null && !CoverLoadFailed;
     public int PlaytimeMinutes => Game.TotalPlaytimeMinutes;
     public IReadOnlyList<GameSource> Sources => Game.Sources;
     public GameSource? PrimarySource => PreferredSourceResolver.Resolve(Game, _storeOrder);
 
     public bool CanEdit => !IsSaving;
+    public bool CanAddCollection => CanEdit && !string.IsNullOrWhiteSpace(CollectionDraft);
+    public IReadOnlyList<string> Collections => Game.User.Collections;
+    public bool HasCollections => Collections.Count > 0;
     public bool CanSavePreference => CanEdit && PendingStorePreference != null &&
         PendingStorePreference.Store != Game.User.PreferredStoreOverride;
     public bool HasActionMessage => !string.IsNullOrEmpty(ActionMessage);
     public string HideActionLabel => IsHidden ? "Restore to library" : "Hide from library";
     public string FavoriteActionLabel => IsFavorite ? "Remove favorite" : "Add favorite";
-    public string LaunchActionLabel => $"Open via {PrimaryStoreName}";
+    public string LaunchActionLabel => PrimarySource?.IsInstalled == true ? $"Play via {PrimaryStoreName}" : $"Open in {PrimaryStoreName}";
     public string InstallationStatus => IsInstalled ? "Installed" : "Not installed";
     public IReadOnlyList<StorePreferenceOption> StorePreferences { get; }
     public StorePreferenceOption SelectedStorePreference =>
@@ -180,6 +194,30 @@ public sealed partial class GameCardViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanSavePreference))]
     public Task SavePreferredStoreAsync() => SetPreferredStoreAsync(PendingStorePreference);
 
+    [RelayCommand(CanExecute = nameof(CanAddCollection))]
+    public Task AddCollectionAsync() => ChangeCollectionAsync(CollectionDraft, true);
+
+    [RelayCommand(CanExecute = nameof(CanEdit))]
+    public Task RemoveCollectionAsync(string? name) => ChangeCollectionAsync(name, false);
+
+    private async Task ChangeCollectionAsync(string? name, bool add)
+    {
+        if (IsSaving || string.IsNullOrWhiteSpace(name)) return;
+        IsSaving = true;
+        ActionMessage = string.Empty;
+        try
+        {
+            var saved = await _database.ChangeCollectionAsync(Game.Id, name, add);
+            Game.User.Collections = saved.ToList();
+            OnPropertyChanged(nameof(Collections));
+            OnPropertyChanged(nameof(HasCollections));
+            if (add) CollectionDraft = string.Empty;
+            ActionMessage = add ? $"Added to {name.Trim()}." : $"Removed from {name.Trim()}.";
+        }
+        catch (Exception ex) { ActionMessage = $"Could not save collection: {ex.Message}"; }
+        finally { IsSaving = false; }
+    }
+
     [RelayCommand]
     public void Launch()
     {
@@ -187,5 +225,11 @@ public sealed partial class GameCardViewModel : ObservableObject
         ActionMessage = target == null
             ? "No launcher is linked to this game. Sync your library to refresh its sources."
             : _launcher.Launch(target).Message;
+    }
+
+    public void LaunchSource(GameSource source)
+    {
+        if (!Game.Sources.Contains(source)) return;
+        ActionMessage = _launcher.Launch(source).Message;
     }
 }

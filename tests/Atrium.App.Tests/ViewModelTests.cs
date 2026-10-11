@@ -58,6 +58,10 @@ public class ViewModelTests : IDisposable
         launcher.Source!.Store.Should().Be(StoreKind.Gog);
         card.ActionMessage.Should().Be("Launcher failed for this test");
         (await db.GetAllGamesAsync()).Single().User.PreferredStoreOverride.Should().Be(StoreKind.Gog);
+        card.LaunchSource(game.Sources[0]);
+        launcher.Source!.Store.Should().Be(StoreKind.Steam);
+        card.PrimarySource!.Store.Should().Be(StoreKind.Gog);
+        (await db.GetAllGamesAsync()).Single().User.PreferredStoreOverride.Should().Be(StoreKind.Gog);
         card.SavePreferredStoreCommand.CanExecute(null).Should().BeFalse();
         card.UpdateStoreOrder(PreferredSourceResolver.CreateStoreOrder(StoreKind.Steam));
         card.PrimarySource!.Store.Should().Be(StoreKind.Gog);

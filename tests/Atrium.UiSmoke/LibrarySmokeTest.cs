@@ -7,6 +7,11 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI;
 using Microsoft.UI.Input;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
+using Windows.Graphics.Imaging;
+using Windows.Storage;
+using Windows.Storage.Streams;
 
 namespace Atrium.App;
 
@@ -20,6 +25,7 @@ public sealed partial class MainWindow
         int loadedGames = 0, realizedCards = 0;
         bool imageFailureFallback = false, libraryControls = false, detailsBindings = false, compactLayout = false;
         bool themedTitleBar = false, sourcesControls = false;
+        bool launchView = false, collectionEditor = false, compactSidebar = false;
         var controlsOnly = Environment.GetCommandLineArgs().Contains("--controls-only");
         var reportPath = Path.Combine(AppContext.BaseDirectory, "ui-smoke.json");
         var corruptCover = Path.Combine(AppContext.BaseDirectory, "invalid-smoke-cover.png");
@@ -44,6 +50,9 @@ public sealed partial class MainWindow
                     errors.Add($"The title bar did not follow the {theme} app theme.");
             }
             SetTheme(originalTheme);
+            if (NavView.OpenPaneLength > 216 || NavView.CompactPaneLength > 52 || NavView.IsPaneOpen)
+                errors.Add("The sidebar did not start in its compact state.");
+            compactSidebar = errors.Count == 0;
             NavView.SelectedItem = NavView.MenuItems[1];
             await Task.Delay(150);
             var sourcesPage = ContentFrame.Content as SourcesPage
@@ -113,7 +122,7 @@ public sealed partial class MainWindow
             AppWindow.Resize(new Windows.Graphics.SizeInt32(800, 700));
             await Task.Delay(250);
             libraryPage.UpdateLayout();
-            foreach (var name in new[] { "SearchBox", "FilterBox", "SortBox" })
+            foreach (var name in new[] { "SearchBox", "FilterBox", "SortBox", "CollectionBox" })
             {
                 var control = libraryPage.FindName(name) as FrameworkElement
                     ?? throw new InvalidOperationException($"{name} was not created.");
@@ -136,6 +145,10 @@ public sealed partial class MainWindow
                 var details = libraryPage.FindName("DetailsCard") as FrameworkElement;
                 if (details == null || details.ActualWidth > libraryPage.ActualWidth || details.ActualHeight > libraryPage.ActualHeight)
                     errors.Add("The details panel overflowed the compact Library viewport.");
+                var sourceList = libraryPage.FindName("LaunchSourcesList") as ItemsControl;
+                var collectionList = libraryPage.FindName("GameCollectionsList") as ItemsControl;
+                if (sourceList?.Items.Count != game.Sources.Count || collectionList?.Items.Count != game.Collections.Count)
+                    errors.Add("The launch view did not bind its game sources and collections.");
                 library.CloseDetails();
                 await Task.Delay(50);
             }
@@ -143,6 +156,79 @@ public sealed partial class MainWindow
             compactLayout = errors.Count == 0;
             AppWindow.Resize(new Windows.Graphics.SizeInt32(1200, 900));
             await Task.Delay(250);
+            var artGame = library.FilteredGames.FirstOrDefault(card => card.CoverUri?.IsFile == true)
+                ?? library.FilteredGames.FirstOrDefault(card => card.HasCover);
+            if (artGame != null)
+            {
+                library.SelectGame(artGame);
+                await Task.Delay(1800);
+                libraryPage.UpdateLayout();
+                await SaveUiSnapshotAsync("launch-wide.png");
+                var themeService = new ArtworkThemeService();
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                try
+                {
+                    var palette = await themeService.GetPaletteAsync(artGame.CoverUri, timeout.Token);
+                    var brush = (libraryPage.FindName("LaunchButton") as Button)?.Background as SolidColorBrush;
+                    if (brush?.Color.R != palette.Accent.R || brush?.Color.G != palette.Accent.G || brush?.Color.B != palette.Accent.B)
+                        errors.Add("The launch button did not adapt to the selected cover's palette.");
+                }
+                catch (OperationCanceledException) { errors.Add("Artwork palette decoding timed out."); }
+                var alternate = library.FilteredGames.FirstOrDefault(card => card.CoverUri?.IsFile == true && card.CoverUri != artGame.CoverUri);
+                if (alternate != null)
+                {
+                    library.SelectGame(alternate);
+                    await Task.Delay(250);
+                    library.SelectGame(artGame);
+                    await Task.Delay(250);
+                    var expected = await themeService.GetPaletteAsync(artGame.CoverUri, timeout.Token);
+                    var returned = (libraryPage.FindName("LaunchButton") as Button)?.Background as SolidColorBrush;
+                    if (returned?.Color.R != expected.Accent.R || returned?.Color.B != expected.Accent.B)
+                        errors.Add("Switching between games left the previous game's artwork theme on screen.");
+                }
+                AppWindow.Resize(new Windows.Graphics.SizeInt32(720, 800));
+                await Task.Delay(250);
+                libraryPage.UpdateLayout();
+                await SaveUiSnapshotAsync("launch-compact.png");
+                var body = libraryPage.FindName("LaunchOrganizeCard") as FrameworkElement;
+                if (body == null || Grid.GetColumn(body) != 0 || Grid.GetRow(body) != 1)
+                    errors.Add("The launch view did not stack its cards in a compact window.");
+                library.CloseDetails();
+            }
+            AppWindow.Resize(new Windows.Graphics.SizeInt32(1200, 900));
+            await Task.Delay(250);
+            var fixturePath = Path.Combine(AppContext.BaseDirectory, $"collections-smoke-{Guid.NewGuid():N}.db");
+            using (var fixtureDb = new LibraryDatabase(fixturePath))
+            {
+                await fixtureDb.InitializeAsync();
+                var fixtureGame = new Game { Title = "Collection editor test", User = new() { Collections = ["Backlog"] } };
+                await fixtureDb.UpsertGamesAsync([fixtureGame]);
+                var fixture = new GameCardViewModel(fixtureGame, fixtureDb);
+                library.SelectGame(fixture);
+                await Task.Delay(100);
+                var nameBox = libraryPage.FindName("CollectionNameBox") as TextBox
+                    ?? throw new InvalidOperationException("Collection name editor was not created.");
+                nameBox.Text = "Co-op";
+                await Task.Delay(100);
+                if (fixture.CollectionDraft != "Co-op") errors.Add("The native collection editor did not update its draft.");
+                await fixture.AddCollectionCommand.ExecuteAsync(null);
+                await Task.Delay(100);
+                var collectionList = libraryPage.FindName("GameCollectionsList") as ItemsControl;
+                if (collectionList?.Items.Count != 2 || nameBox.Text.Length != 0)
+                    errors.Add("Adding a collection did not update the native list and clear the editor.");
+                await fixture.RemoveCollectionCommand.ExecuteAsync("Backlog");
+                await Task.Delay(100);
+                if (collectionList?.Items.Count != 1 || fixture.Collections.Single() != "Co-op")
+                    errors.Add("Removing a collection did not update the native list.");
+                library.CloseDetails();
+            }
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            File.Delete(fixturePath);
+            File.Delete(fixturePath + "-wal");
+            File.Delete(fixturePath + "-shm");
+            launchView = errors.Count == 0;
+            collectionEditor = errors.Count == 0;
+            await SaveUiSnapshotAsync("library-compact-sidebar.png");
             File.WriteAllText(corruptCover, "This is deliberately not an image.");
             var db = App.GetService<LibraryDatabase>();
             var brokenCoverCard = new GameCardViewModel(new Game
@@ -197,9 +283,31 @@ public sealed partial class MainWindow
                 CompactLayout = compactLayout,
                 ThemedTitleBar = themedTitleBar,
                 SourcesControls = sourcesControls,
+                LaunchView = launchView,
+                CollectionEditor = collectionEditor,
+                CompactSidebar = compactSidebar,
                 Errors = errors
             }, new JsonSerializerOptions { WriteIndented = true }));
             Environment.Exit(errors.Count == 0 ? 0 : 1);
         }
+    }
+
+    private async Task SaveUiSnapshotAsync(string name)
+    {
+        var bitmap = new RenderTargetBitmap();
+        await bitmap.RenderAsync(Content);
+        var buffer = await bitmap.GetPixelsAsync();
+        using var reader = DataReader.FromBuffer(buffer);
+        var pixels = new byte[buffer.Length];
+        reader.ReadBytes(pixels);
+        var path = Path.Combine(AppContext.BaseDirectory, name);
+        File.WriteAllBytes(path, []);
+        var file = await StorageFile.GetFileFromPathAsync(path);
+        using var stream = await file.OpenAsync(FileAccessMode.ReadWrite);
+        var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId, stream);
+        encoder.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied,
+            (uint)bitmap.PixelWidth, (uint)bitmap.PixelHeight, 96, 96, pixels);
+        await encoder.FlushAsync();
+
     }
 }
